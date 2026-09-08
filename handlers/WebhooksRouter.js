@@ -136,10 +136,15 @@ const WebhooksRouter = async (req, res) => {
             case 'invoice.payment_succeeded':
                 try {
                     const invoice = event.data.object;
+                    const paymentHistory = PaymentHistory.fromStripeInvoice(invoice);
+                    const subscriptionId = process.env.LOCAL_FANOUT_SUBSCRIPTION_ID || paymentHistory.stripe_subscription_id;
                     
                     // Si el invoice tiene una suscripción asociada, actualizar los períodos
-                    if (invoice.subscription) {
-                        const subscriptionId = invoice.subscription;
+                    if (!subscriptionId) {
+                        console.log('invoice.payment_succeeded no-sub', invoice.id);
+                    }
+                    if (subscriptionId) {
+                        console.log('invoice.payment_succeeded', subscriptionId);
                         const customerId = invoice.customer;
                         const periodStart = invoice.period_start ? new Date(invoice.period_start * 1000) : null;
                         const periodEnd = invoice.period_end ? new Date(invoice.period_end * 1000) : null;
@@ -161,7 +166,6 @@ const WebhooksRouter = async (req, res) => {
                             'active',
                             db
                         );
-                        const paymentHistory = PaymentHistory.fromStripeInvoice(invoice);
                         eventData = invoice;
                         const paymentResult = await PaymentHistoryManager.createPaymentHistoryInDB(paymentHistory, db);
                         if (!paymentResult.success) {
@@ -177,10 +181,12 @@ const WebhooksRouter = async (req, res) => {
             case 'invoice.payment_failed':
                 try {
                     const invoice = event.data.object;
+                    const paymentHistory = PaymentHistory.fromStripeInvoice(invoice);
+                    const subscriptionId = process.env.LOCAL_FANOUT_SUBSCRIPTION_ID || paymentHistory.stripe_subscription_id;
                     
                     // Si el invoice tiene una suscripción asociada, actualizar el estado
-                    if (invoice.subscription) {
-                        const subscriptionId = invoice.subscription;
+                    if (subscriptionId) {
+                        console.log('invoice.payment_failed', subscriptionId);
                         const customerId = invoice.customer;
                         
                         const result = await SubscriptionManager.updateSubscriptionOnPaymentFailed(
@@ -197,7 +203,6 @@ const WebhooksRouter = async (req, res) => {
                             'unpaid',
                             db
                         );
-                        const paymentHistory = PaymentHistory.fromStripeInvoice(invoice);
                         eventData = invoice;
                         const paymentResult = await PaymentHistoryManager.createPaymentHistoryInDB(paymentHistory, db);
                         if (!paymentResult.success) {

@@ -1,0 +1,28 @@
+{
+  "id": "evt_invoice_paid_parent_1",
+  "type": "invoice.payment_succeeded",
+  "data": {
+    "object": {
+      "id": "in_parent_1",
+      "object": "invoice",
+      "customer": "cus_test123",
+      "status": "paid",
+      "amount_paid": 99900,
+      "amount_due": 0,
+      "total": 99900,
+      "currency": "usd",
+      "created": 1700000000,
+      "period_start": 1700000000,
+      "period_end": 1702678400,
+      "number": "INV-PARENT",
+      "invoice_pdf": "https://stripe.com/invoice.pdf",
+      "hosted_invoice_url": "https://stripe.com/invoice",
+      "parent": {
+        "type": "subscription_details",
+        "subscription_details": {
+          "subscription": "sub_test123"
+        }
+      }
+    }
+  }
+}

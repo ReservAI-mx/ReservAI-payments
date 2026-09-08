@@ -29,6 +29,7 @@ process.env.SENTRY_TRACES_SAMPLE_RATE = '0';
 process.env.RATE_LIMIT_MAX_REQUESTS = process.env.RATE_LIMIT_MAX_REQUESTS || '1000';
 process.env.RATE_LIMIT_WINDOW_MS = process.env.RATE_LIMIT_WINDOW_MS || '900000';
 process.env.DB_HOST = process.env.DB_HOST || 'localhost';
+delete process.env.LOCAL_FANOUT_SUBSCRIPTION_ID;
 process.env.DB_PORT = process.env.DB_PORT || '5432';
 process.env.DB_NAME = process.env.DB_NAME || 'testdb';
 process.env.DB_USER = process.env.DB_USER || 'test';

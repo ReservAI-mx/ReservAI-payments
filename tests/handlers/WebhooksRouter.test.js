@@ -173,6 +173,20 @@ describe('WebhooksRouter', () => {
     expect(EmailManager.sendEmailToCustomer).not.toHaveBeenCalled();
   });
 
+  it('invoice.payment_succeeded with parent.subscription_details fans out ok', async () => {
+    await runWebhook('invoice.payment_succeeded.parent');
+    expect(TechnicalInfoManager.setStatusBySubscriptionId).toHaveBeenCalledWith(
+      'sub_test123',
+      'active',
+      db
+    );
+    expect(PaymentFanout.notifyBySubscriptionId).toHaveBeenCalledWith(
+      'sub_test123',
+      'ok',
+      db
+    );
+  });
+
   it('invoice.payment_succeeded without subscription skips payment_history', async () => {
     await runWebhook('invoice.payment_succeeded.nosub');
     expect(PaymentHistoryManager.createPaymentHistoryInDB).not.toHaveBeenCalled();
