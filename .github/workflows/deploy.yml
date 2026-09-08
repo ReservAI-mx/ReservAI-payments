@@ -34,7 +34,7 @@ jobs:
 
       - name: Check required files
         run: |
-          for f in Dockerfile fly.toml package.json server.js; do
+          for f in Dockerfile fly.toml package.json server.js certs/prod-ca-2021.crt; do
             if [ ! -f "$f" ]; then
               echo "::error::Falta el archivo requerido: $f"
               exit 1

@@ -1,0 +1,18 @@
+{
+  "id": "evt_pi_failed_invoice_1",
+  "type": "payment_intent.payment_failed",
+  "data": {
+    "object": {
+      "id": "pi_test_invoice_failed",
+      "object": "payment_intent",
+      "customer": "cus_test123",
+      "invoice": "in_test456",
+      "amount": 99900,
+      "currency": "usd",
+      "status": "requires_payment_method",
+      "last_payment_error": {
+        "message": "Your card was declined."
+      }
+    }
+  }
+}

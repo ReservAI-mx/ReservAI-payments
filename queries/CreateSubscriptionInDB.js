@@ -9,9 +9,10 @@ module.exports = `
         cancel_at_period_end,
         plan_name,
         amount,
-        created_at
+        created_at,
+        technical_info_id
     )
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
     RETURNING *
 `;
 

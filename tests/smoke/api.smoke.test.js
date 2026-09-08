@@ -22,6 +22,19 @@ jest.mock('../../utils/CustomersManager', () => ({
 jest.mock('../../utils/SubscriptionManager', () => ({
   getSubscriptionsSummaries: jest.fn(),
   createSubscriptionPaymentLinks: jest.fn(),
+  createSetupPaymentLinks: jest.fn(),
+  createActivateCheckout: jest.fn(),
+}));
+
+jest.mock('../../utils/TechnicalInfoManager', () => ({
+  subdomainTaken: jest.fn(),
+  getSetupsByAccountId: jest.fn(),
+  getSetupForActivate: jest.fn(),
+  listTenants: jest.fn(),
+  getById: jest.fn(),
+  markReady: jest.fn(),
+  deletePending: jest.fn(),
+  publicFields: jest.fn((row) => row),
 }));
 
 jest.mock('../../data/StripeInstanceGetter', () =>
@@ -37,6 +50,7 @@ const request = require('supertest');
 const AccountManager = require('../../utils/AccountManager');
 const CustomersManager = require('../../utils/CustomersManager');
 const SubscriptionManager = require('../../utils/SubscriptionManager');
+const TechnicalInfoManager = require('../../utils/TechnicalInfoManager');
 const getStripeInstance = require('../../data/StripeInstanceGetter');
 const { accessCookie, twoFaCookie, cookieHeader } = require('../helpers/cookieAuth');
 const { SQLI_PAYLOADS } = require('../helpers/securityPayloads');
@@ -108,6 +122,20 @@ describe('smoke: API wiring', () => {
       success: true,
       subscriptions: [],
     });
+    SubscriptionManager.createSetupPaymentLinks.mockResolvedValue({
+      success: true,
+      message: 'ok',
+      paymentLinks: { basico: { url: 'https://checkout/b' }, premium: { url: 'https://checkout/p' } },
+    });
+    TechnicalInfoManager.subdomainTaken.mockResolvedValue({ success: true, taken: false });
+    TechnicalInfoManager.getSetupsByAccountId.mockResolvedValue({
+      success: true,
+      setups: [],
+    });
+    TechnicalInfoManager.listTenants.mockResolvedValue({
+      success: true,
+      tenants: [],
+    });
     getStripeInstance.mockResolvedValue({
       customers: { create: jest.fn().mockResolvedValue({ id: 'cus_new' }) },
       billingPortal: {
@@ -139,6 +167,9 @@ describe('smoke: API wiring', () => {
     { method: 'get', path: '/api/billing/links' },
     { method: 'get', path: '/api/status' },
     { method: 'get', path: '/api/billing/status' },
+    { method: 'get', path: '/api/billing/setup' },
+    { method: 'post', path: '/api/billing/activate' },
+    { method: 'get', path: '/api/billing/tenants' },
   ];
 
   test.each(protectedRoutes)('$method $path sin cookie → 418', async ({ method, path }) => {
@@ -163,8 +194,8 @@ describe('smoke: API wiring', () => {
       .get('/api/status')
       .set('Cookie', cookieHeader(accessCookie('account-1')));
     expect(res.status).toBe(200);
-    expect(res.body.success).toBe(true);
-    expect(res.body.subscriptions).toEqual([]);
+    expect(res.body.data).toEqual([]);
+    expect(res.body.current_page).toBe(1);
   });
 
   test('GET /api/billing/portal con pm_access → 200', async () => {

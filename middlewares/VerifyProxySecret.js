@@ -33,6 +33,9 @@ function shouldSkipPath(req) {
   const raw = (req.originalUrl || req.url || '').split('?')[0];
   if (SKIP_PATHS.has(raw)) return true;
   if (req.path && SKIP_PATHS.has(req.path)) return true;
+  // Stripe CLI / Dashboard no envían X-Proxy-Secret. La firma v1 cubre el path.
+  if (raw === '/webhooks' || raw.startsWith('/webhooks/')) return true;
+  if (req.path === '/webhooks' || (req.path && req.path.startsWith('/webhooks/'))) return true;
   return false;
 }
 

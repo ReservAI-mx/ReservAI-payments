@@ -1,0 +1,20 @@
+{
+  "id": "evt_checkout_setup_1",
+  "type": "checkout.session.completed",
+  "data": {
+    "object": {
+      "id": "cs_setup_b",
+      "object": "checkout.session",
+      "mode": "payment",
+      "amount_total": 50000,
+      "currency": "usd",
+      "customer": "cus_test123",
+      "metadata": {
+        "kind": "setup",
+        "account_id": "00000000-0000-4000-8000-000000000001",
+        "subdomain": "negocio",
+        "planned_plan": "basico"
+      }
+    }
+  }
+}

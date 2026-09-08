@@ -10,6 +10,24 @@ describe('VerifyProxySecret', () => {
     expect(next).toHaveBeenCalled();
   });
 
+  it('skips /webhooks/stripe even when secret is configured', () => {
+    const prevEnv = process.env.NODE_ENV;
+    const prevSecret = process.env.PROXY_SECRET_HEADER;
+    process.env.NODE_ENV = 'development';
+    process.env.PROXY_SECRET_HEADER = 'expected-secret';
+    global.IS_PRODUCTION = false;
+    try {
+      const req = createMockReq({ originalUrl: '/webhooks/stripe', path: '/stripe' });
+      const next = createMockNext();
+      VerifyProxySecret(req, createMockRes(), next);
+      expect(next).toHaveBeenCalled();
+    } finally {
+      process.env.NODE_ENV = prevEnv;
+      if (prevSecret === undefined) delete process.env.PROXY_SECRET_HEADER;
+      else process.env.PROXY_SECRET_HEADER = prevSecret;
+    }
+  });
+
   it('timingSafeEqualString compares secrets', () => {
     expect(VerifyProxySecret.timingSafeEqualString('abc', 'abc')).toBe(true);
     expect(VerifyProxySecret.timingSafeEqualString('abc', 'abd')).toBe(false);

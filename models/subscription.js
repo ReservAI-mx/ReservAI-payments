@@ -9,7 +9,8 @@ class Subscription {
         cancel_at_period_end = false,
         plan_name = null,
         amount,
-        created_at = new Date()
+        created_at = new Date(),
+        technical_info_id = null
     ) {
         this.stripe_customer_id = stripe_customer_id;
         this.stripe_subscription_id = stripe_subscription_id;
@@ -21,6 +22,7 @@ class Subscription {
         this.plan_name = plan_name;
         this.amount = amount;
         this.created_at = created_at;
+        this.technical_info_id = technical_info_id || null;
     }
 
     toJSON() {
@@ -34,7 +36,8 @@ class Subscription {
             cancel_at_period_end: this.cancel_at_period_end,
             plan_name: this.plan_name,
             amount: this.amount,
-            created_at: this.created_at
+            created_at: this.created_at,
+            technical_info_id: this.technical_info_id
         }
     }
 
@@ -78,7 +81,8 @@ class Subscription {
             stripeSubscription.cancel_at_period_end || false,
             planName,
             price?.unit_amount ? price.unit_amount / 100 : 0, // Convertir de centavos a dólares
-            new Date(stripeSubscription.created * 1000)
+            new Date(stripeSubscription.created * 1000),
+            stripeSubscription.metadata?.technical_info_id || null
         );
     }
 }

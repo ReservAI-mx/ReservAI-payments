@@ -7,6 +7,13 @@ const SubscriptionManager = require('../utils/SubscriptionManager');
 const PaymentHistoryManager = require('../utils/PaymentHistoryManager');
 const EmailContentManager = require('../utils/EmailContentManager');
 const EmailManager = require('../utils/EmailManager');
+const PaymentFailedAlertManager = require('../utils/PaymentFailedAlertManager');
+const SetupPaidAlertManager = require('../utils/SetupPaidAlertManager');
+const TechnicalInfoManager = require('../utils/TechnicalInfoManager');
+const PaymentFanout = require('../utils/PaymentFanout');
+const VaultCrypto = require('../utils/VaultCrypto');
+const crypto = require('crypto');
+const uuid = require('uuid');
 
 
 
@@ -15,6 +22,7 @@ const WebhooksRouter = async (req, res) => {
     res.status(200).json({ received: true });
     let db = null;
     let eventData = null; // Variable para almacenar la instancia creada (Subscription o PaymentHistory)
+    let setupPaidInserted = false;
     try {
         db = await connectDB();
     } catch (error) {
@@ -42,6 +50,23 @@ const WebhooksRouter = async (req, res) => {
                     if (!result.success) {
                         return;
                     }
+                    if (subscription.technical_info_id) {
+                        await TechnicalInfoManager.linkSubscription(
+                            subscription.technical_info_id,
+                            subscription.stripe_subscription_id,
+                            db
+                        );
+                        await TechnicalInfoManager.setStatus(
+                            subscription.technical_info_id,
+                            'active',
+                            db
+                        );
+                    }
+                    await PaymentFanout.notifyBySubscriptionId(
+                        subscription.stripe_subscription_id,
+                        'ok',
+                        db
+                    );
                 } catch (error) {
                     // Error procesando suscripción creada
                 }
@@ -97,6 +122,12 @@ const WebhooksRouter = async (req, res) => {
                     if (!result.success) {
                         // Error actualizando suscripción cancelada en DB
                     }
+                    await TechnicalInfoManager.setStatusBySubscriptionId(
+                        subscriptionId,
+                        'unpaid',
+                        db
+                    );
+                    await PaymentFanout.notifyBySubscriptionId(subscriptionId, 'unpaid', db);
                 } catch (error) {
                     // Error procesando suscripción eliminada
                 }
@@ -105,10 +136,15 @@ const WebhooksRouter = async (req, res) => {
             case 'invoice.payment_succeeded':
                 try {
                     const invoice = event.data.object;
+                    const paymentHistory = PaymentHistory.fromStripeInvoice(invoice);
+                    const subscriptionId = process.env.LOCAL_FANOUT_SUBSCRIPTION_ID || paymentHistory.stripe_subscription_id;
                     
                     // Si el invoice tiene una suscripción asociada, actualizar los períodos
-                    if (invoice.subscription) {
-                        const subscriptionId = invoice.subscription;
+                    if (!subscriptionId) {
+                        console.log('invoice.payment_succeeded no-sub', invoice.id);
+                    }
+                    if (subscriptionId) {
+                        console.log('invoice.payment_succeeded', subscriptionId);
                         const customerId = invoice.customer;
                         const periodStart = invoice.period_start ? new Date(invoice.period_start * 1000) : null;
                         const periodEnd = invoice.period_end ? new Date(invoice.period_end * 1000) : null;
@@ -125,14 +161,17 @@ const WebhooksRouter = async (req, res) => {
                                 // Error actualizando suscripción en pago exitoso
                             }
                         }
-                    }
-                    
-                    // Agregar el invoice al payment_history
-                    const paymentHistory = PaymentHistory.fromStripeInvoice(invoice);
-                    eventData = invoice; // Guardar el invoice original para el email (tiene todos los campos que necesitan los views)
-                    const paymentResult = await PaymentHistoryManager.createPaymentHistoryInDB(paymentHistory, db);
-                    if (!paymentResult.success) {
-                        // Error creando registro en payment_history
+                        await TechnicalInfoManager.setStatusBySubscriptionId(
+                            subscriptionId,
+                            'active',
+                            db
+                        );
+                        eventData = invoice;
+                        const paymentResult = await PaymentHistoryManager.createPaymentHistoryInDB(paymentHistory, db);
+                        if (!paymentResult.success) {
+                            // Error creando registro en payment_history
+                        }
+                        await PaymentFanout.notifyBySubscriptionId(subscriptionId, 'ok', db);
                     }
                 } catch (error) {
                     // Error procesando pago exitoso de invoice
@@ -142,10 +181,12 @@ const WebhooksRouter = async (req, res) => {
             case 'invoice.payment_failed':
                 try {
                     const invoice = event.data.object;
+                    const paymentHistory = PaymentHistory.fromStripeInvoice(invoice);
+                    const subscriptionId = process.env.LOCAL_FANOUT_SUBSCRIPTION_ID || paymentHistory.stripe_subscription_id;
                     
                     // Si el invoice tiene una suscripción asociada, actualizar el estado
-                    if (invoice.subscription) {
-                        const subscriptionId = invoice.subscription;
+                    if (subscriptionId) {
+                        console.log('invoice.payment_failed', subscriptionId);
                         const customerId = invoice.customer;
                         
                         const result = await SubscriptionManager.updateSubscriptionOnPaymentFailed(
@@ -157,20 +198,54 @@ const WebhooksRouter = async (req, res) => {
                         if (!result.success) {
                             // Error actualizando suscripción en pago fallido
                         }
-                    }
-                    
-                    // Agregar el invoice al payment_history
-                    const paymentHistory = PaymentHistory.fromStripeInvoice(invoice);
-                    eventData = invoice; // Guardar el invoice original para el email (tiene todos los campos que necesitan los views)
-                    const paymentResult = await PaymentHistoryManager.createPaymentHistoryInDB(paymentHistory, db);
-                    if (!paymentResult.success) {
-                        // Error creando registro en payment_history
+                        await TechnicalInfoManager.setStatusBySubscriptionId(
+                            subscriptionId,
+                            'unpaid',
+                            db
+                        );
+                        eventData = invoice;
+                        const paymentResult = await PaymentHistoryManager.createPaymentHistoryInDB(paymentHistory, db);
+                        if (!paymentResult.success) {
+                            // Error creando registro en payment_history
+                        }
+                        await PaymentFanout.notifyBySubscriptionId(subscriptionId, 'unpaid', db);
                     }
                 } catch (error) {
                     // Error procesando pago fallido de invoice
                 }
                 break;
                 
+            case 'checkout.session.completed':
+                try {
+                    const session = event.data.object;
+                    const metadata = session.metadata || {};
+                    if (metadata.kind !== 'setup') {
+                        break;
+                    }
+                    const inboundPlain = crypto.randomBytes(32).toString('hex');
+                    const inboundBlob = VaultCrypto.encrypt(inboundPlain);
+                    const inserted = await TechnicalInfoManager.insertFromSetupSession({
+                        id: uuid.v4(),
+                        account_id: metadata.account_id,
+                        subdomain: metadata.subdomain,
+                        planned_plan: metadata.planned_plan,
+                        inbound_auth_key: inboundBlob,
+                        setup_session_id: session.id,
+                    }, db);
+                    setupPaidInserted = Boolean(inserted.success && inserted.tenant);
+                    if (setupPaidInserted) {
+                        eventData = {
+                            amount_total: session.amount_total,
+                            currency: session.currency,
+                            subdomain: metadata.subdomain,
+                            planned_plan: metadata.planned_plan,
+                        };
+                    }
+                } catch (error) {
+                    // Error procesando checkout de anticipo
+                }
+                break;
+
             default:
                 // Evento no manejado - no imprimir nada
                 break;
@@ -180,89 +255,81 @@ const WebhooksRouter = async (req, res) => {
         // Error procesando webhook
     }
     
+    let customerInfo = null;
+
     // Enviar email al cliente (excepto para customer.created)
     try {
-        // Early return si es customer.created
-        if (event.type === 'customer.created') {
-            return;
-        }
-        
-        const eventObject = event.data.object;
-        
-        // Early return si no hay customer
-        if (!eventObject.customer) {
-            return;
-        }
-        
-        // Obtener customer_id (puede ser string o objeto expandido)
-        const customerId = typeof eventObject.customer === 'string' 
-            ? eventObject.customer 
-            : eventObject.customer.id || eventObject.customer;
-        
-        // Early return si no hay customerId
-        if (!customerId) {
-            return;
-        }
-        
-        // Obtener email y nombre del cliente
-        const customerInfo = await CustomersManager.getCustomersEmailAndName(customerId, db);
-        if (!customerInfo.success) {
-            return;
-        }
-        
-        // Early return si no hay eventData
-        if (!eventData) {
-            return;
-        }
-        
-        // Convertir eventData al formato que esperan los views
-        let emailData = null;
-        if (eventData instanceof Subscription) {
-            // Para subscriptions, convertir a formato que esperan los views
-            const subscriptionJSON = eventData.toJSON();
-            emailData = {
-                plan_name: subscriptionJSON.plan_name,
-                amount: subscriptionJSON.amount * 100, // Convertir de dólares a centavos (los views esperan centavos)
-                current_period_start: subscriptionJSON.current_period_start instanceof Date 
-                    ? Math.floor(subscriptionJSON.current_period_start.getTime() / 1000) 
-                    : subscriptionJSON.current_period_start,
-                current_period_end: subscriptionJSON.current_period_end instanceof Date 
-                    ? Math.floor(subscriptionJSON.current_period_end.getTime() / 1000) 
-                    : subscriptionJSON.current_period_end,
-                status: subscriptionJSON.status
-            };
-        } else {
-            // Para invoices, eventData ya es el objeto invoice original de Stripe
-            emailData = eventData;
-        }
-        
-        // Obtener el contenido del email
-        const emailContent = await EmailContentManager.getEmailContent(
-            customerInfo.name,
-            event.type,
-            emailData
-        );
-        
-        // Early return si no hay contenido de email
-        if (!emailContent) {
-            return;
-        }
-        
-        // Enviar el email
-        const emailResult = await EmailManager.sendEmailToCustomer(
-            customerInfo.email,
-            emailContent.subject,
-            emailContent.content,
-            emailContent.text_content
-        );
-        
-        if (!emailResult.success) {
-            return;
+        if (event.type !== 'customer.created') {
+            const eventObject = event.data.object;
+
+            if (eventObject?.customer) {
+                const customerId = typeof eventObject.customer === 'string'
+                    ? eventObject.customer
+                    : eventObject.customer.id || eventObject.customer;
+
+                if (customerId) {
+                    const lookup = await CustomersManager.getCustomersEmailAndName(customerId, db);
+                    if (lookup.success) {
+                        customerInfo = lookup;
+                    }
+                }
+            }
+
+            if (customerInfo && eventData) {
+                let emailData = null;
+                if (eventData instanceof Subscription) {
+                    const subscriptionJSON = eventData.toJSON();
+                    emailData = {
+                        plan_name: subscriptionJSON.plan_name,
+                        amount: subscriptionJSON.amount * 100,
+                        current_period_start: subscriptionJSON.current_period_start instanceof Date
+                            ? Math.floor(subscriptionJSON.current_period_start.getTime() / 1000)
+                            : subscriptionJSON.current_period_start,
+                        current_period_end: subscriptionJSON.current_period_end instanceof Date
+                            ? Math.floor(subscriptionJSON.current_period_end.getTime() / 1000)
+                            : subscriptionJSON.current_period_end,
+                        status: subscriptionJSON.status
+                    };
+                } else {
+                    emailData = eventData;
+                }
+
+                const emailContent = await EmailContentManager.getEmailContent(
+                    customerInfo.name,
+                    event.type,
+                    emailData
+                );
+
+                if (emailContent) {
+                    await EmailManager.sendEmailToCustomer(
+                        customerInfo.email,
+                        emailContent.subject,
+                        emailContent.content,
+                        emailContent.text_content
+                    );
+                }
+            }
         }
     } catch (error) {
         // Error en el proceso de envío de email
     }
-    
+
+    try {
+        if (event.type === 'invoice.payment_failed' || event.type === 'payment_intent.payment_failed') {
+            await PaymentFailedAlertManager.notifyTeam(event, customerInfo);
+        }
+    } catch (error) {
+        // Error enviando alerta interna de pago fallido
+    }
+
+    try {
+        if (setupPaidInserted) {
+            await SetupPaidAlertManager.notifyTeam(event, customerInfo);
+        }
+    } catch (error) {
+        // Error enviando alerta interna de anticipo
+    }
+
     return;
 }
 

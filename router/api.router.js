@@ -3,23 +3,28 @@ const router = express.Router();
 
 //middlewares
 const AccountIsAClient = require('../middlewares/AccountIsAClient');
+const AccountIsAdmin = require('../middlewares/AccountIsAdmin');
 const CustomerIsAvailable = require('../middlewares/CustomerIsAvailable');
 const CustomerExistByID = require('../middlewares/CustomerExistByID');
 const AccountExistByID = require('../middlewares/AccountExistByID');
 const VerifyToken = require('../middlewares/VerifyToken');
 const AccessTokenType = require('../middlewares/AccessTokenType');
 const PathSecurityValidator = require('../middlewares/PathSecurityValidator');
+const TechnicalInfoExistByID = require('../middlewares/TechnicalInfoExistByID');
 
 //handlers
 const CreateStripeCustomer = require('../handlers/CreateStripeCustomer');
 const CreatePortalSession = require('../handlers/CreatePortalSession');
 const GetMyPaymentLinks = require('../handlers/GetMyPaymentLinks');
 const GetMySubscriptions = require('../handlers/GetMySubscriptions');
+const GetMyProvision = require('../handlers/GetMyProvision');
+const ActivateSubscription = require('../handlers/ActivateSubscription');
+const ListTenants = require('../handlers/ListTenants');
+const GetTenant = require('../handlers/GetTenant');
+const UpdateTenant = require('../handlers/UpdateTenant');
+const DeleteTenant = require('../handlers/DeleteTenant');
+const RevealInboundHash = require('../handlers/RevealInboundHash');
 
-// Las rutas aquí se montan en /api desde server.js
-// Express automáticamente remueve el prefijo /api antes de pasarlo al router
-
-// Protección de archivos sensibles - debe ir antes de todas las rutas
 router.use(PathSecurityValidator.middleware());
 
 router.get('/health', (req, res) => {
@@ -32,14 +37,21 @@ router.get('/health', (req, res) => {
   });
 
 const withAccess = [VerifyToken, AccessTokenType, AccountExistByID, AccountIsAClient];
+const withAdmin = [VerifyToken, AccessTokenType, AccountExistByID, AccountIsAdmin];
 
 router.post("/customer", ...withAccess, CustomerIsAvailable, CreateStripeCustomer);
 router.get("/portal", ...withAccess, CustomerExistByID, CreatePortalSession);
 router.get("/links", ...withAccess, CustomerExistByID, GetMyPaymentLinks);
 router.get("/status", ...withAccess, CustomerExistByID, GetMySubscriptions);
+router.get("/setup", ...withAccess, CustomerExistByID, GetMyProvision);
+router.post("/activate", ...withAccess, CustomerExistByID, ActivateSubscription);
 
+router.get("/tenants", ...withAdmin, ListTenants);
+router.post("/tenants/:id/reveal-hash", ...withAdmin, TechnicalInfoExistByID, RevealInboundHash);
+router.get("/tenants/:id", ...withAdmin, TechnicalInfoExistByID, GetTenant);
+router.patch("/tenants/:id", ...withAdmin, TechnicalInfoExistByID, UpdateTenant);
+router.delete("/tenants/:id", ...withAdmin, TechnicalInfoExistByID, DeleteTenant);
 
-  // Middleware para manejar rutas no encontradas
 router.use((req, res) => {
     return res.status(404).json({
       error: 'Ruta no encontrada',

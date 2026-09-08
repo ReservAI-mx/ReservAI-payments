@@ -1,0 +1,23 @@
+{
+  "id": "evt_invoice_setup_paid_1",
+  "type": "invoice.payment_succeeded",
+  "data": {
+    "object": {
+      "id": "in_setup_500",
+      "object": "invoice",
+      "customer": "cus_test123",
+      "subscription": null,
+      "status": "paid",
+      "amount_paid": 50000,
+      "amount_due": 0,
+      "total": 50000,
+      "currency": "usd",
+      "created": 1700000000,
+      "period_start": 1700000000,
+      "period_end": 1700000000,
+      "number": "INV-SETUP",
+      "invoice_pdf": "https://stripe.com/invoice.pdf",
+      "hosted_invoice_url": "https://stripe.com/invoice"
+    }
+  }
+}

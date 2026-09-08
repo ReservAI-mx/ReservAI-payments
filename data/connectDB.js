@@ -4,18 +4,60 @@ const fs = require('fs');
 const path = require('path');
 const dns = require('dns').promises;
 
-// Configurar DNS para resolver IPv6 primero, luego IPv4
 dns.setDefaultResultOrder('ipv6first');
+
+/** Errores de red/TLS del pooler (idle kill, Fly suspend, timeout) que no deben tumbar el proceso. */
+function isTransientDbError(err) {
+    if (!err) return false;
+    const code = err.code || err.errno;
+    const msg = String(err.message || err);
+    const transientCodes = new Set([
+        'ETIMEDOUT',
+        'ECONNRESET',
+        'ECONNREFUSED',
+        'EPIPE',
+        'ENOTFOUND',
+        'ENETUNREACH',
+        'EHOSTUNREACH',
+        'EAI_AGAIN',
+        '57P01',
+        '57P02',
+        '57P03',
+    ]);
+    if (transientCodes.has(code)) return true;
+    return /ETIMEDOUT|ECONNRESET|ECONNREFUSED|EPIPE|ENOTFOUND|Connection terminated|server closed the connection|timeout exceeded|read ETIMEDOUT|write ETIMEDOUT/i.test(msg);
+}
+
+function reportTransientDbError(err, source) {
+    console.error(`⚠️  Error transitorio de DB (${source}):`, err?.code || err?.message || err);
+    try {
+        const Sentry = require('@sentry/node');
+        Sentry.withScope((scope) => {
+            scope.setLevel('warning');
+            scope.setTag('error_source', 'db_network');
+            scope.setTag('db_error_code', String(err?.code || 'unknown'));
+            scope.setExtra('handler', source);
+            Sentry.captureException(err);
+        });
+    } catch {
+        /* Sentry opcional */
+    }
+}
 
 class DatabaseConnection {
     constructor() {
         this.pool = null;
+        this._rawQuery = null;
         this.isConnected = false;
         this.reconnectAttempts = 0;
         this.maxReconnectAttempts = 5;
         this.reconnectDelay = 5000;
-        this.connectionCheckInterval = 60000; // Aumentado a 60 segundos
+        this.reconnectCooldownMs = 60000;
+        this.connectionCheckInterval = 60000;
         this.checkIntervalId = null;
+        this.reconnectTimer = null;
+        this.reconnectResetTimer = null;
+        this.isReconnecting = false;
     }
 
     async verifyDNS(hostname) {
@@ -26,14 +68,12 @@ class DatabaseConnection {
             return true;
         } catch (error) {
             console.error(`❌ Error al resolver DNS:`, error.message);
-            
-            // Intentar con IPv4 explícitamente
+
             try {
                 const addresses = await dns.resolve4(hostname);
                 console.log(`✅ DNS IPv4 resuelto:`, addresses);
                 return true;
             } catch (error4) {
-                // Intentar con IPv6 explícitamente
                 try {
                     const addresses = await dns.resolve6(hostname);
                     console.log(`✅ DNS IPv6 resuelto:`, addresses);
@@ -53,12 +93,14 @@ class DatabaseConnection {
                 return this.pool;
             }
 
+            if (this.pool) {
+                await this.safeEndPool();
+            }
+
             console.log('🔄 Iniciando conexión a la base de datos...');
-            
-            // Obtener la URL de conexión
+
             const dbUrl = await getdbinfo();
-            
-            // Extraer hostname para verificar DNS
+
             const urlMatch = dbUrl.match(/@([^:]+):/);
             if (urlMatch) {
                 const hostname = urlMatch[1];
@@ -67,55 +109,28 @@ class DatabaseConnection {
                     throw new Error(`No se puede resolver el hostname: ${hostname}. Verifica tu conexión de red y configuración IPv6.`);
                 }
             }
-            
-            // Configuración SSL con certificado
+
             const sslConfig = this.getSSLConfig();
-            
-            // Configuración del pool de conexiones para Transaction Pooler
+
             const config = {
                 connectionString: dbUrl,
-                max: 5, // Transaction pooler maneja menos conexiones
-                min: 1, // Mínimo de 1
-                idleTimeoutMillis: 30000, // 30 segundos
-                connectionTimeoutMillis: 10000, // 10 segundos
+                max: 5,
+                min: 0,
+                idleTimeoutMillis: 20000,
+                connectionTimeoutMillis: 10000,
+                keepAlive: true,
+                keepAliveInitialDelayMillis: 10000,
+                allowExitOnIdle: true,
                 ssl: sslConfig,
                 application_name: 'PassManager'
             };
 
-            // Crear el pool de conexiones
             this.pool = new Pool(config);
+            this.attachPoolHandlers(this.pool);
 
-            // Configurar eventos del pool
-            this.pool.on('connect', (client) => {
-                console.log('✅ Nueva conexión establecida a la base de datos');
-                this.isConnected = true;
-                this.reconnectAttempts = 0;
-                
-                // Configurar el cliente para mantener la conexión viva
-                client.query('SET statement_timeout = 0');
-                client.query('SET idle_in_transaction_session_timeout = 0');
-            });
-
-            this.pool.on('error', (err, client) => {
-                // Logs de error detallados removidos por seguridad
-                
-                // No marcar como desconectado inmediatamente
-                // Dejar que el mecanismo de verificación lo maneje
-                if (err.message.includes('ENOTFOUND') || err.message.includes('ECONNREFUSED')) {
-                    this.isConnected = false;
-                    this.handleReconnection();
-                }
-            });
-
-            this.pool.on('remove', () => {
-                console.log('⚠️  Cliente removido del pool');
-            });
-
-            // Probar la conexión
             const client = await this.pool.connect();
             try {
-                const result = await client.query('SELECT NOW(), version()');
-                // Logs de información del servidor removidos por seguridad
+                await client.query('SELECT NOW(), version()');
             } finally {
                 client.release();
             }
@@ -124,15 +139,11 @@ class DatabaseConnection {
             this.isConnected = true;
             this.reconnectAttempts = 0;
 
-            // Iniciar verificación periódica de conexión
             this.startConnectionCheck();
 
             return this.pool;
 
         } catch (error) {
-            // Logs de error detallados removidos por seguridad
-            
-            // Información adicional para debugging
             if (error.message.includes('ENOTFOUND')) {
                 console.error('💡 Posibles soluciones:');
                 console.error('   1. Verifica que tu instancia tenga acceso a Internet');
@@ -140,47 +151,125 @@ class DatabaseConnection {
                 console.error('   3. Verifica que IPv6 esté habilitado en Windows Server');
                 console.error('   4. Revisa las reglas de seguridad de AWS (Security Groups)');
             }
-            
+
             this.isConnected = false;
+            await this.safeEndPool();
             throw error;
         }
     }
 
-    async handleReconnection() {
+    attachPoolHandlers(pool) {
+        this._rawQuery = pool.query.bind(pool);
+        pool.query = (...args) => this.query(...args);
+
+        pool.on('connect', (client) => {
+            console.log('✅ Nueva conexión establecida a la base de datos');
+            this.isConnected = true;
+            this.reconnectAttempts = 0;
+
+            client.on('error', (err) => {
+                reportTransientDbError(err, 'pg_client');
+                if (isTransientDbError(err)) {
+                    this.isConnected = false;
+                    this.scheduleReconnect();
+                }
+            });
+
+            client.query('SET statement_timeout = 0').catch(() => {});
+            client.query('SET idle_in_transaction_session_timeout = 0').catch(() => {});
+        });
+
+        pool.on('error', (err) => {
+            reportTransientDbError(err, 'pg_pool');
+            if (isTransientDbError(err)) {
+                this.isConnected = false;
+                this.scheduleReconnect();
+            }
+        });
+
+        pool.on('remove', () => {
+            console.log('⚠️  Cliente removido del pool');
+        });
+    }
+
+    async safeEndPool() {
+        const pool = this.pool;
+        this.pool = null;
+        this._rawQuery = null;
+        this.isConnected = false;
+        if (!pool) return;
+        try {
+            pool.removeAllListeners('error');
+            pool.removeAllListeners('connect');
+            pool.removeAllListeners('remove');
+            await pool.end();
+        } catch (err) {
+            if (isTransientDbError(err)) {
+                reportTransientDbError(err, 'pg_pool_end');
+            } else {
+                console.error('⚠️  Error al cerrar pool:', err?.message || err);
+            }
+        }
+    }
+
+    scheduleReconnect() {
+        if (this.isReconnecting || this.reconnectTimer) {
+            return;
+        }
+
         if (this.reconnectAttempts >= this.maxReconnectAttempts) {
             console.error('❌ Máximo número de intentos de reconexión alcanzado');
+            if (!this.reconnectResetTimer) {
+                this.reconnectResetTimer = setTimeout(() => {
+                    this.reconnectResetTimer = null;
+                    this.reconnectAttempts = 0;
+                    console.log('🔄 Reiniciando contador de reconexión tras cooldown');
+                    this.scheduleReconnect();
+                }, this.reconnectCooldownMs);
+            }
             return;
         }
 
         this.reconnectAttempts++;
-        const delay = this.reconnectDelay * this.reconnectAttempts; // Backoff exponencial
-        console.log(`🔄 Intentando reconectar en ${delay/1000}s... (${this.reconnectAttempts}/${this.maxReconnectAttempts})`);
+        const delay = this.reconnectDelay * this.reconnectAttempts;
+        console.log(`🔄 Intentando reconectar en ${delay / 1000}s... (${this.reconnectAttempts}/${this.maxReconnectAttempts})`);
 
-        setTimeout(async () => {
-            try {
-                // Cerrar el pool anterior si existe
-                if (this.pool) {
-                    await this.pool.end();
-                    this.pool = null;
-                }
-                await this.connect();
-            } catch (error) {
-                // Log de error de reconexión removido por seguridad
-            }
+        this.reconnectTimer = setTimeout(() => {
+            this.reconnectTimer = null;
+            this.runReconnect().catch((err) => {
+                reportTransientDbError(err, 'pg_reconnect');
+                this.scheduleReconnect();
+            });
         }, delay);
     }
 
+    async runReconnect() {
+        if (this.isReconnecting) return;
+        this.isReconnecting = true;
+        try {
+            await this.safeEndPool();
+            await this.connect();
+        } finally {
+            this.isReconnecting = false;
+        }
+    }
+
+    handleReconnection() {
+        this.scheduleReconnect();
+    }
+
     startConnectionCheck() {
-        // Limpiar intervalo anterior si existe
         if (this.checkIntervalId) {
             clearInterval(this.checkIntervalId);
         }
 
         this.checkIntervalId = setInterval(async () => {
+            if (this.isReconnecting) return;
+
             if (!this.pool) {
                 console.log('⚠️  Pool no existe, intentando reconectar...');
                 this.isConnected = false;
-                this.handleReconnection();
+                this.scheduleReconnect();
                 return;
             }
 
@@ -197,16 +286,18 @@ class DatabaseConnection {
                     client.release();
                 }
             } catch (error) {
-                // Log de error de verificación removido por seguridad
                 this.isConnected = false;
-                this.handleReconnection();
+                if (isTransientDbError(error)) {
+                    reportTransientDbError(error, 'pg_healthcheck');
+                }
+                this.scheduleReconnect();
             }
         }, this.connectionCheckInterval);
     }
 
-    async query(text, params) {
-        if (!this.pool) {
-            throw new Error('No hay pool de conexiones');
+    async query(...args) {
+        if (!this.pool || !this._rawQuery) {
+            await this.connect();
         }
 
         const maxRetries = 3;
@@ -214,19 +305,27 @@ class DatabaseConnection {
 
         for (let i = 0; i < maxRetries; i++) {
             try {
-                const result = await this.pool.query(text, params);
+                if (!this._rawQuery) {
+                    await this.connect();
+                }
+                const result = await this._rawQuery(...args);
+                this.isConnected = true;
+                this.reconnectAttempts = 0;
                 return result;
             } catch (error) {
                 lastError = error;
-                // Log de error de query removido por seguridad
-                
+                if (!isTransientDbError(error)) {
+                    throw error;
+                }
+                this.isConnected = false;
+                reportTransientDbError(error, 'pg_query');
                 if (i < maxRetries - 1) {
-                    // Esperar antes de reintentar
-                    await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1)));
+                    await new Promise((resolve) => setTimeout(resolve, 250 * (i + 1)));
                 }
             }
         }
 
+        this.scheduleReconnect();
         throw lastError;
     }
 
@@ -235,18 +334,34 @@ class DatabaseConnection {
             clearInterval(this.checkIntervalId);
             this.checkIntervalId = null;
         }
-
-        if (this.pool) {
-            await this.pool.end();
-            this.pool = null;
-            this.isConnected = false;
-            console.log('🔌 Conexión a la base de datos cerrada');
+        if (this.reconnectTimer) {
+            clearTimeout(this.reconnectTimer);
+            this.reconnectTimer = null;
         }
+        if (this.reconnectResetTimer) {
+            clearTimeout(this.reconnectResetTimer);
+            this.reconnectResetTimer = null;
+        }
+
+        await this.safeEndPool();
+        console.log('🔌 Conexión a la base de datos cerrada');
     }
 
     getSSLConfig() {
+        const env = String(process.env.NODE_ENV || process.env.STAGE || '').trim().toLowerCase();
+        if (env === 'development' || env === 'dev' || env === 'test') {
+            console.log('🔓 SSL deshabilitado (modo development)');
+            return false;
+        }
+
+        const dbSSL = String(process.env.DB_SSL ?? '').trim().toLowerCase();
+        if (dbSSL === 'false' || dbSSL === '0' || dbSSL === 'off' || dbSSL === 'no') {
+            console.log('🔓 SSL deshabilitado (DB_SSL=false)');
+            return false;
+        }
+
         const certsDir = path.join(__dirname, '../certs');
-        
+
         let certPath = null;
         if (fs.existsSync(certsDir)) {
             const files = fs.readdirSync(certsDir);
@@ -255,21 +370,20 @@ class DatabaseConnection {
                 certPath = path.join(certsDir, certFile);
             }
         }
-        
+
         if (certPath && fs.existsSync(certPath)) {
             try {
                 const certContent = fs.readFileSync(certPath, 'utf8');
                 console.log('🔐 Usando certificado SSL de Supabase:', path.basename(certPath));
-                
+
                 return {
                     rejectUnauthorized: true,
                     ca: certContent,
                     secureProtocol: 'TLSv1_2_method',
                     checkServerIdentity: (servername, cert) => {
-                        // Validación adicional del certificado del servidor
-                        return undefined; // Aceptar si pasa validaciones básicas
+                        return undefined;
                     },
-                    timeout: 10000, // 10 segundos timeout
+                    timeout: 10000,
                     keepAlive: true
                 };
             } catch (error) {
@@ -283,18 +397,16 @@ class DatabaseConnection {
     }
 
     getDefaultSSLConfig() {
-        // Configuración SSL más segura por defecto
         return {
-            rejectUnauthorized: true, // Más estricto por defecto
+            rejectUnauthorized: true,
             secureProtocol: 'TLSv1_2_method',
-            timeout: 10000, // 10 segundos timeout
+            timeout: 10000,
             keepAlive: true,
             checkServerIdentity: (servername, cert) => {
-                // Validación básica del certificado del servidor
                 if (!cert || !cert.subject) {
                     return new Error('Invalid certificate');
                 }
-                return undefined; // Aceptar si pasa validaciones básicas
+                return undefined;
             }
         };
     }
@@ -309,18 +421,19 @@ class DatabaseConnection {
     }
 }
 
-// Instancia singleton
 let dbInstance = null;
+let processGuardsInstalled = false;
 
 const connectDB = async () => {
     if (!dbInstance) {
         dbInstance = new DatabaseConnection();
     }
-    
+    installProcessGuards();
+
     if (!dbInstance.isConnected) {
         await dbInstance.connect();
     }
-    
+
     return dbInstance.pool;
 };
 
@@ -332,25 +445,61 @@ const getDB = async () => {
     return dbInstance.pool;
 };
 
-// Manejar cierre graceful
-process.on('SIGTERM', async () => {
-    console.log('🔄 SIGTERM recibido, cerrando conexiones...');
-    if (dbInstance) {
-        await dbInstance.close();
+function installProcessGuards() {
+    if (processGuardsInstalled || process.env.NODE_ENV === 'test') {
+        return;
     }
-    process.exit(0);
-});
+    processGuardsInstalled = true;
 
-process.on('SIGINT', async () => {
-    console.log('🔄 SIGINT recibido, cerrando conexiones...');
-    if (dbInstance) {
-        await dbInstance.close();
-    }
-    process.exit(0);
-});
+    process.on('uncaughtException', (err) => {
+        if (isTransientDbError(err)) {
+            reportTransientDbError(err, 'uncaughtException');
+            if (dbInstance) {
+                dbInstance.isConnected = false;
+                dbInstance.scheduleReconnect();
+            }
+            return;
+        }
+        console.error('❌ uncaughtException fatal:', err);
+        process.exit(1);
+    });
+
+    process.on('unhandledRejection', (reason) => {
+        const err = reason instanceof Error ? reason : new Error(String(reason));
+        if (isTransientDbError(err) || isTransientDbError(reason)) {
+            reportTransientDbError(err, 'unhandledRejection');
+            if (dbInstance) {
+                dbInstance.isConnected = false;
+                dbInstance.scheduleReconnect();
+            }
+            return;
+        }
+        console.error('❌ unhandledRejection fatal:', reason);
+        process.exit(1);
+    });
+}
+
+if (process.env.NODE_ENV !== 'test') {
+    process.on('SIGTERM', async () => {
+        console.log('🔄 SIGTERM recibido, cerrando conexiones...');
+        if (dbInstance) {
+            await dbInstance.close();
+        }
+        process.exit(0);
+    });
+
+    process.on('SIGINT', async () => {
+        console.log('🔄 SIGINT recibido, cerrando conexiones...');
+        if (dbInstance) {
+            await dbInstance.close();
+        }
+        process.exit(0);
+    });
+}
 
 module.exports = {
     connectDB,
     getDB,
-    getDBInstance: () => dbInstance
+    getDBInstance: () => dbInstance,
+    isTransientDbError,
 };

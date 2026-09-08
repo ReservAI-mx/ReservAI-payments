@@ -1,11 +1,33 @@
 const SubscriptionManager = require('../utils/SubscriptionManager');
 const CustomersManager = require('../utils/CustomersManager');
+const TechnicalInfoManager = require('../utils/TechnicalInfoManager');
 const getStripeInstance = require('../data/StripeInstanceGetter');
+const { connectDB } = require('../data/connectDB');
+const { validateSubdomain } = require('../utils/SubdomainValidator');
 
 const GetMyPaymentLinks = async (req, res) => {
     const { customer } = req;
     const { account } = req;
-    
+    const parsed = validateSubdomain(req.query.subdomain);
+    if (parsed.error) {
+        return res.status(400).json({ error: parsed.error });
+    }
+
+    let db = null;
+    try {
+        db = await connectDB();
+    } catch (error) {
+        return res.status(500).json({ error: 'Internal server error' });
+    }
+
+    const taken = await TechnicalInfoManager.subdomainTaken(parsed.subdomain, db);
+    if (taken.error) {
+        return res.status(500).json({ error: taken.error });
+    }
+    if (taken.taken) {
+        return res.status(409).json({ error: 'SUBDOMAIN_TAKEN' });
+    }
+
     let stripe = null;
     try {
         stripe = await getStripeInstance();
@@ -13,7 +35,6 @@ const GetMyPaymentLinks = async (req, res) => {
         return res.status(500).json({ error: 'Internal server error' });
     }
 
-    // Obtener el link del portal de facturación
     const portalResult = await CustomersManager.createPortalSession(
         customer.stripe_customer_id,
         stripe
@@ -24,18 +45,17 @@ const GetMyPaymentLinks = async (req, res) => {
         portalUrl = portalResult.session.url;
     }
 
-    // Crear ambos payment links (básico y premium) redirigiendo al portal
-    const result = await SubscriptionManager.createSubscriptionPaymentLinks(
+    const result = await SubscriptionManager.createSetupPaymentLinks(
         customer.stripe_customer_id,
         account.id,
-        account.email,
-        portalUrl,  // success_url -> portal
-        portalUrl,  // cancel_url -> portal
+        parsed.subdomain,
+        portalUrl,
+        portalUrl,
         stripe
     );
 
     if (!result.success) {
-        return res.status(500).json({ 
+        return res.status(500).json({
             error: result.error || 'Error creating payment links',
             errors: result.errors
         });
@@ -48,4 +68,3 @@ const GetMyPaymentLinks = async (req, res) => {
 }
 
 module.exports = GetMyPaymentLinks;
-
