@@ -5,8 +5,28 @@ const UpdateSubscriptionOnPaymentFailed = require('../queries/UpdateSubscription
 const UpdateSubscriptionOnCancellation = require('../queries/UpdateSubscriptionOnCancellation');
 const Subscription = require('../models/subscription');
 const GetSubscriptionsSummaries = require('../queries/GetSubscriptionsSummaries');
+const GetCancelAtPeriodEnd = require('../queries/GetCancelAtPeriodEnd');
 
 class SubscriptionManager {
+
+    static async getCancelAtPeriodEnd(stripe_subscription_id, db) {
+        try {
+            if (!stripe_subscription_id) {
+                return { success: true, cancel_at_period_end: false };
+            }
+            const result = await db.query(GetCancelAtPeriodEnd, [stripe_subscription_id]);
+            return {
+                success: true,
+                cancel_at_period_end: Boolean(result.rows[0]?.cancel_at_period_end),
+            };
+        } catch (error) {
+            return {
+                success: false,
+                cancel_at_period_end: false,
+                error: error.message,
+            };
+        }
+    }
 
     static async getSubscriptionsSummaries(stripe_customer_id, account_id, db, offset = 0, limit = 1000) {
         try {

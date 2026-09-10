@@ -135,6 +135,9 @@ const startServer = async () => {
     await connectDB();
     console.log('✅ Base de datos conectada exitosamente');
 
+    const OpsJobPoller = require('./utils/OpsJobPoller');
+    OpsJobPoller.start();
+
     const app = createApp();
     app.listen(PORT, '0.0.0.0', () => {
       const now = new Date();

@@ -10,6 +10,8 @@ const LinkSubscriptionToTenant = require('../queries/LinkSubscriptionToTenant');
 const SetTenantStatus = require('../queries/SetTenantStatus');
 const SetTenantStatusBySubscriptionId = require('../queries/SetTenantStatusBySubscriptionId');
 const GetTenantForFanout = require('../queries/GetTenantForFanout');
+const GetTechnicalInfoBySetupSessionId = require('../queries/GetTechnicalInfoBySetupSessionId');
+const ClaimProvisionRetry = require('../queries/ClaimProvisionRetry');
 
 function fail(error) {
     return { success: false, error: error.message };
@@ -27,6 +29,11 @@ class TechnicalInfoManager {
             planned_plan: row.planned_plan,
             created_at: row.created_at,
             stripe_subscription_id: row.stripe_subscription_id || null,
+            provision_error: row.provision_error || null,
+            hostinger_vm_id: row.hostinger_vm_id || null,
+            hostinger_vm_ip: row.hostinger_vm_ip || null,
+            dns_apex_record_id: row.dns_apex_record_id || null,
+            dns_wildcard_record_id: row.dns_wildcard_record_id || null,
         };
     }
 
@@ -146,6 +153,24 @@ class TechnicalInfoManager {
         try {
             const result = await db.query(GetTenantForFanout, [stripe_subscription_id]);
             return { success: true, tenant: result.rows[0] || null };
+        } catch (error) {
+            return fail(error);
+        }
+    }
+
+    static async getBySetupSessionId(setup_session_id, db) {
+        try {
+            const result = await db.query(GetTechnicalInfoBySetupSessionId, [setup_session_id]);
+            return { success: true, tenant: result.rows[0] || null };
+        } catch (error) {
+            return fail(error);
+        }
+    }
+
+    static async claimProvisionRetry(id, db) {
+        try {
+            const result = await db.query(ClaimProvisionRetry, [id]);
+            return { success: true, id: result.rows[0]?.id || null };
         } catch (error) {
             return fail(error);
         }

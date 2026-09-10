@@ -52,4 +52,19 @@ describe('SubscriptionManager', () => {
     expect(result.paymentLinks.basico.url).toBe('https://basico');
     expect(stripe.checkout.sessions.create).toHaveBeenCalledTimes(2);
   });
+
+  it('getCancelAtPeriodEnd returns flag from row', async () => {
+    db.query.mockResolvedValue({ rows: [{ cancel_at_period_end: true }] });
+    const result = await SubscriptionManager.getCancelAtPeriodEnd('sub_1', db);
+    expect(result.success).toBe(true);
+    expect(result.cancel_at_period_end).toBe(true);
+    expect(db.query).toHaveBeenCalledWith(expect.any(String), ['sub_1']);
+  });
+
+  it('getCancelAtPeriodEnd defaults false when missing', async () => {
+    db.query.mockResolvedValue({ rows: [] });
+    const result = await SubscriptionManager.getCancelAtPeriodEnd('sub_missing', db);
+    expect(result.success).toBe(true);
+    expect(result.cancel_at_period_end).toBe(false);
+  });
 });
