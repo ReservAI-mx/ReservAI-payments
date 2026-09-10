@@ -1,13 +1,8 @@
 .env
 .env.local
-.env.example
 .env.prod
 
 *.log
 node_modules
 
 testing/
-
-# El CA público de Supabase sí se versiona. No subir claves privadas.
-certs/*
-!certs/*.crt
