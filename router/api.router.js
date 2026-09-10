@@ -24,6 +24,10 @@ const GetTenant = require('../handlers/GetTenant');
 const UpdateTenant = require('../handlers/UpdateTenant');
 const DeleteTenant = require('../handlers/DeleteTenant');
 const RevealInboundHash = require('../handlers/RevealInboundHash');
+const RetryProvision = require('../handlers/RetryProvision');
+const ListJobs = require('../handlers/ListJobs');
+const GetJob = require('../handlers/GetJob');
+const RetryJob = require('../handlers/RetryJob');
 
 router.use(PathSecurityValidator.middleware());
 
@@ -48,9 +52,14 @@ router.post("/activate", ...withAccess, CustomerExistByID, ActivateSubscription)
 
 router.get("/tenants", ...withAdmin, ListTenants);
 router.post("/tenants/:id/reveal-hash", ...withAdmin, TechnicalInfoExistByID, RevealInboundHash);
+router.post("/tenants/:id/retry-provision", ...withAdmin, TechnicalInfoExistByID, RetryProvision);
 router.get("/tenants/:id", ...withAdmin, TechnicalInfoExistByID, GetTenant);
 router.patch("/tenants/:id", ...withAdmin, TechnicalInfoExistByID, UpdateTenant);
 router.delete("/tenants/:id", ...withAdmin, TechnicalInfoExistByID, DeleteTenant);
+
+router.get("/jobs", ...withAdmin, ListJobs);
+router.get("/jobs/:id", ...withAdmin, GetJob);
+router.post("/jobs/:id/retry", ...withAdmin, RetryJob);
 
 router.use((req, res) => {
     return res.status(404).json({

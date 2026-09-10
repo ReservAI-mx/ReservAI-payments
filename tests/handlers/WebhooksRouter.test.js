@@ -8,6 +8,7 @@ jest.mock('../../utils/PaymentFailedAlertManager');
 jest.mock('../../utils/SetupPaidAlertManager');
 jest.mock('../../utils/TechnicalInfoManager');
 jest.mock('../../utils/PaymentFanout');
+jest.mock('../../utils/ProvisionFanout');
 jest.mock('../../utils/VaultCrypto');
 
 const { connectDB } = require('../../data/connectDB');
@@ -20,6 +21,7 @@ const PaymentFailedAlertManager = require('../../utils/PaymentFailedAlertManager
 const SetupPaidAlertManager = require('../../utils/SetupPaidAlertManager');
 const TechnicalInfoManager = require('../../utils/TechnicalInfoManager');
 const PaymentFanout = require('../../utils/PaymentFanout');
+const ProvisionFanout = require('../../utils/ProvisionFanout');
 const VaultCrypto = require('../../utils/VaultCrypto');
 const WebhooksRouter = require('../../handlers/WebhooksRouter');
 const { loadStripeFixture } = require('../helpers/stripeFixtures');
@@ -43,6 +45,10 @@ describe('WebhooksRouter', () => {
     SubscriptionManager.updateSubscriptionOnCancellation.mockResolvedValue({ success: true });
     SubscriptionManager.updateSubscriptionOnPaymentSuccess.mockResolvedValue({ success: true });
     SubscriptionManager.updateSubscriptionOnPaymentFailed.mockResolvedValue({ success: true });
+    SubscriptionManager.getCancelAtPeriodEnd.mockResolvedValue({
+      success: true,
+      cancel_at_period_end: false,
+    });
     PaymentHistoryManager.createPaymentHistoryInDB.mockResolvedValue({ success: true });
     EmailContentManager.getEmailContent.mockResolvedValue({
       subject: 'Subj',
@@ -62,7 +68,10 @@ describe('WebhooksRouter', () => {
     TechnicalInfoManager.linkSubscription.mockResolvedValue({ success: true });
     TechnicalInfoManager.setStatus.mockResolvedValue({ success: true });
     TechnicalInfoManager.setStatusBySubscriptionId.mockResolvedValue({ success: true });
+    TechnicalInfoManager.getForFanout.mockResolvedValue({ success: true, tenant: { id: 'ti-1', subdomain: 'acme' } });
+    TechnicalInfoManager.getBySetupSessionId.mockResolvedValue({ success: true, tenant: null });
     PaymentFanout.notifyBySubscriptionId.mockResolvedValue();
+    ProvisionFanout.notify.mockResolvedValue({ success: true });
     VaultCrypto.encrypt.mockReturnValue('{"keyId":"v1"}');
   });
 
@@ -116,6 +125,7 @@ describe('WebhooksRouter', () => {
     expect(SubscriptionManager.updateSubscriptionOnPaymentSuccess).toHaveBeenCalled();
     expect(PaymentHistoryManager.createPaymentHistoryInDB).toHaveBeenCalled();
     expect(EmailManager.sendEmailToCustomer).toHaveBeenCalled();
+    expect(ProvisionFanout.notify).toHaveBeenCalledWith('ti-1', 'enable_renewal', db);
   });
 
   it('invoice.payment_failed marks unpaid, records history and alerts the team', async () => {
@@ -123,6 +133,21 @@ describe('WebhooksRouter', () => {
     expect(SubscriptionManager.updateSubscriptionOnPaymentFailed).toHaveBeenCalled();
     expect(PaymentHistoryManager.createPaymentHistoryInDB).toHaveBeenCalled();
     expect(PaymentFailedAlertManager.notifyTeam).toHaveBeenCalled();
+    expect(ProvisionFanout.notify).toHaveBeenCalledWith('ti-1', 'disable_renewal', db);
+  });
+
+  it('invoice.payment_succeeded skips enable_renewal when cancel_at_period_end', async () => {
+    SubscriptionManager.getCancelAtPeriodEnd.mockResolvedValueOnce({
+      success: true,
+      cancel_at_period_end: true,
+    });
+    await runWebhook('invoice.payment_succeeded');
+    expect(PaymentFanout.notifyBySubscriptionId).toHaveBeenCalledWith(
+      expect.any(String),
+      'ok',
+      db
+    );
+    expect(ProvisionFanout.notify).not.toHaveBeenCalledWith('ti-1', 'enable_renewal');
   });
 
   it('payment_intent.payment_failed without invoice alerts the team', async () => {
@@ -159,8 +184,13 @@ describe('WebhooksRouter', () => {
   });
 
   it('checkout.session.completed setup inserts technical_info and emails customer + team', async () => {
+    TechnicalInfoManager.insertFromSetupSession.mockResolvedValueOnce({
+      success: true,
+      tenant: { id: 'ti-1', status: 'pending_provision', provision_error: null },
+    });
     await runWebhook('checkout.session.completed');
     expect(TechnicalInfoManager.insertFromSetupSession).toHaveBeenCalled();
+    expect(ProvisionFanout.notify).toHaveBeenCalledWith('ti-1', 'provision', db);
     expect(SetupPaidAlertManager.notifyTeam).toHaveBeenCalled();
     expect(EmailManager.sendEmailToCustomer).toHaveBeenCalled();
     expect(PaymentHistoryManager.createPaymentHistoryInDB).not.toHaveBeenCalled();
@@ -168,9 +198,31 @@ describe('WebhooksRouter', () => {
 
   it('checkout.session.completed setup replay (ON CONFLICT) does not alert again', async () => {
     TechnicalInfoManager.insertFromSetupSession.mockResolvedValueOnce({ success: true, tenant: null });
+    TechnicalInfoManager.getBySetupSessionId.mockResolvedValueOnce({
+      success: true,
+      tenant: { id: 'ti-1', status: 'pending_provision', provision_error: 'dns_apex: x' },
+    });
     await runWebhook('checkout.session.completed');
     expect(SetupPaidAlertManager.notifyTeam).not.toHaveBeenCalled();
     expect(EmailManager.sendEmailToCustomer).not.toHaveBeenCalled();
+    expect(ProvisionFanout.notify).not.toHaveBeenCalled();
+  });
+
+  it('customer.subscription.updated with cancellation disables renewal', async () => {
+    await runWebhook('customer.subscription.updated');
+    expect(SubscriptionManager.updateSubscriptionInDB).toHaveBeenCalled();
+    expect(ProvisionFanout.notify).toHaveBeenCalledWith('ti-1', 'disable_renewal', db);
+  });
+
+  it('customer.subscription.updated.reactivate enables renewal', async () => {
+    await runWebhook('customer.subscription.updated.reactivate');
+    expect(SubscriptionManager.updateSubscriptionInDB).toHaveBeenCalled();
+    expect(ProvisionFanout.notify).toHaveBeenCalledWith('ti-1', 'enable_renewal', db);
+  });
+
+  it('customer.subscription.deleted also disables hostinger renewal', async () => {
+    await runWebhook('customer.subscription.deleted');
+    expect(ProvisionFanout.notify).toHaveBeenCalledWith('ti-1', 'disable_renewal', db);
   });
 
   it('invoice.payment_succeeded with parent.subscription_details fans out ok', async () => {
@@ -185,12 +237,14 @@ describe('WebhooksRouter', () => {
       'ok',
       db
     );
+    expect(ProvisionFanout.notify).toHaveBeenCalledWith('ti-1', 'enable_renewal', db);
   });
 
   it('invoice.payment_succeeded without subscription skips payment_history', async () => {
     await runWebhook('invoice.payment_succeeded.nosub');
     expect(PaymentHistoryManager.createPaymentHistoryInDB).not.toHaveBeenCalled();
     expect(SubscriptionManager.updateSubscriptionOnPaymentSuccess).not.toHaveBeenCalled();
+    expect(ProvisionFanout.notify).not.toHaveBeenCalled();
   });
 
   it('email failure still responded 200 first', async () => {

@@ -10,5 +10,6 @@ module.exports = `
     )
     VALUES ($1, $2, $3, 'pending_provision', $4, $5, $6)
     ON CONFLICT (setup_session_id) DO NOTHING
-    RETURNING id, account_id, subdomain, status, planned_plan, created_at, setup_session_id
+    RETURNING id, account_id, subdomain, status, planned_plan, created_at, setup_session_id,
+              provision_error, hostinger_vm_id, hostinger_vm_ip, dns_apex_record_id, dns_wildcard_record_id
 `;
