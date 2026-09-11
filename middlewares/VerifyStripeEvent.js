@@ -1,12 +1,15 @@
 const { addRequestTraceStep } = require('../utils/RequestTrace');
 const WebhooksManager = require('../utils/WebhooksManager');
 const getStripeInstance = require('../data/StripeInstanceGetter');
+const { captureStripeFailure, flushSentry } = require('../utils/captureOpsError');
 
 const VerifyStripeEvent = async (req, res, next) => {
     let stripe = null;
     try {
         stripe = await getStripeInstance();
     } catch (error) {
+        captureStripeFailure(error, { area: 'webhook', phase: 'verify.getStripeInstance' });
+        await flushSentry();
         return res.status(500).json({ error: 'Internal server error' });
     }
     // Stripe envía la firma en el header 'stripe-signature'
@@ -35,6 +38,8 @@ const VerifyStripeEvent = async (req, res, next) => {
     
     if (result.error) {
         console.error('❌ Error verificando webhook:', result.error);
+        captureStripeFailure(result.error, { area: 'webhook', phase: 'verify.signature' });
+        await flushSentry();
         return res.status(403).json({ 
             error: result.error,
             message: 'No se pudo verificar la firma del webhook'
@@ -43,6 +48,11 @@ const VerifyStripeEvent = async (req, res, next) => {
     
     if (!result.success) {
         console.error('❌ Webhook no verificado:', result.message);
+        captureStripeFailure(result.message || 'Webhook verification failed', {
+            area: 'webhook',
+            phase: 'verify.failed',
+        });
+        await flushSentry();
         return res.status(403).json({ 
             error: result.message || 'Webhook verification failed'
         });

@@ -3,6 +3,7 @@ const CustomersManager = require('../utils/CustomersManager');
 const TechnicalInfoManager = require('../utils/TechnicalInfoManager');
 const getStripeInstance = require('../data/StripeInstanceGetter');
 const { connectDB } = require('../data/connectDB');
+const { captureStripeFailure } = require('../utils/captureOpsError');
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -17,6 +18,7 @@ const ActivateSubscription = async (req, res) => {
     try {
         db = await connectDB();
     } catch (error) {
+        captureStripeFailure(error, { phase: 'billing.activate.connectDB' });
         return res.status(500).json({ error: 'Internal server error' });
     }
 
@@ -26,6 +28,10 @@ const ActivateSubscription = async (req, res) => {
         db
     );
     if (lookup.error) {
+        captureStripeFailure(lookup.error, {
+            phase: 'billing.activate.lookup',
+            technical_info_id,
+        });
         return res.status(500).json({ error: lookup.error });
     }
     if (!lookup.setup) {
@@ -39,6 +45,7 @@ const ActivateSubscription = async (req, res) => {
     try {
         stripe = await getStripeInstance();
     } catch (error) {
+        captureStripeFailure(error, { phase: 'billing.activate.getStripe' });
         return res.status(500).json({ error: 'Internal server error' });
     }
 
@@ -58,6 +65,10 @@ const ActivateSubscription = async (req, res) => {
         stripe
     );
     if (!result.success) {
+        captureStripeFailure(result.error || 'Error creating checkout session', {
+            phase: 'billing.activate.createCheckout',
+            technical_info_id,
+        });
         return res.status(500).json({ error: result.error || 'Error creating checkout session' });
     }
 
