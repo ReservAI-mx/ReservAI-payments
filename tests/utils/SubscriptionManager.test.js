@@ -53,6 +53,38 @@ describe('SubscriptionManager', () => {
     expect(stripe.checkout.sessions.create).toHaveBeenCalledTimes(2);
   });
 
+  it('createSetupPaymentLinks enables promotion codes', async () => {
+    process.env.STRIPE_PRICE_ID_SETUP = 'price_setup';
+    const stripe = {
+      checkout: {
+        sessions: {
+          create: jest
+            .fn()
+            .mockResolvedValueOnce({ id: 'cs_setup_b', url: 'https://setup-basico' })
+            .mockResolvedValueOnce({ id: 'cs_setup_p', url: 'https://setup-premium' }),
+        },
+      },
+    };
+    const result = await SubscriptionManager.createSetupPaymentLinks(
+      'cus_1',
+      'acc_1',
+      'mi-sucursal',
+      'https://ok',
+      'https://cancel',
+      stripe
+    );
+    expect(result.success).toBe(true);
+    expect(stripe.checkout.sessions.create).toHaveBeenCalledTimes(2);
+    expect(stripe.checkout.sessions.create).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ allow_promotion_codes: true, mode: 'payment' })
+    );
+    expect(stripe.checkout.sessions.create).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ allow_promotion_codes: true, mode: 'payment' })
+    );
+  });
+
   it('getCancelAtPeriodEnd returns flag from row', async () => {
     db.query.mockResolvedValue({ rows: [{ cancel_at_period_end: true }] });
     const result = await SubscriptionManager.getCancelAtPeriodEnd('sub_1', db);
