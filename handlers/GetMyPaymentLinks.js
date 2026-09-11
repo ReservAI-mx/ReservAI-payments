@@ -4,6 +4,7 @@ const TechnicalInfoManager = require('../utils/TechnicalInfoManager');
 const getStripeInstance = require('../data/StripeInstanceGetter');
 const { connectDB } = require('../data/connectDB');
 const { validateSubdomain } = require('../utils/SubdomainValidator');
+const { captureStripeFailure } = require('../utils/captureOpsError');
 
 const GetMyPaymentLinks = async (req, res) => {
     const { customer } = req;
@@ -17,11 +18,16 @@ const GetMyPaymentLinks = async (req, res) => {
     try {
         db = await connectDB();
     } catch (error) {
+        captureStripeFailure(error, { phase: 'billing.links.connectDB' });
         return res.status(500).json({ error: 'Internal server error' });
     }
 
     const taken = await TechnicalInfoManager.subdomainTaken(parsed.subdomain, db);
     if (taken.error) {
+        captureStripeFailure(taken.error, {
+            phase: 'billing.links.subdomainTaken',
+            subdomain: parsed.subdomain,
+        });
         return res.status(500).json({ error: taken.error });
     }
     if (taken.taken) {
@@ -32,6 +38,7 @@ const GetMyPaymentLinks = async (req, res) => {
     try {
         stripe = await getStripeInstance();
     } catch (error) {
+        captureStripeFailure(error, { phase: 'billing.links.getStripe' });
         return res.status(500).json({ error: 'Internal server error' });
     }
 
@@ -55,6 +62,10 @@ const GetMyPaymentLinks = async (req, res) => {
     );
 
     if (!result.success) {
+        captureStripeFailure(result.error || 'Error creating payment links', {
+            phase: 'billing.links.createSetup',
+            subdomain: parsed.subdomain,
+        });
         return res.status(500).json({
             error: result.error || 'Error creating payment links',
             errors: result.errors

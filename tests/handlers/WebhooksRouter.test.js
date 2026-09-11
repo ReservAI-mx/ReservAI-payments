@@ -10,6 +10,11 @@ jest.mock('../../utils/TechnicalInfoManager');
 jest.mock('../../utils/PaymentFanout');
 jest.mock('../../utils/ProvisionFanout');
 jest.mock('../../utils/VaultCrypto');
+jest.mock('../../utils/captureOpsError', () => ({
+  captureOpsError: jest.fn((e) => (e instanceof Error ? e : new Error(String(e)))),
+  captureStripeFailure: jest.fn((e) => (e instanceof Error ? e : new Error(String(e)))),
+  flushSentry: jest.fn(async () => {}),
+}));
 
 const { connectDB } = require('../../data/connectDB');
 const CustomersManager = require('../../utils/CustomersManager');
@@ -23,6 +28,7 @@ const TechnicalInfoManager = require('../../utils/TechnicalInfoManager');
 const PaymentFanout = require('../../utils/PaymentFanout');
 const ProvisionFanout = require('../../utils/ProvisionFanout');
 const VaultCrypto = require('../../utils/VaultCrypto');
+const { captureStripeFailure, flushSentry } = require('../../utils/captureOpsError');
 const WebhooksRouter = require('../../handlers/WebhooksRouter');
 const { loadStripeFixture } = require('../helpers/stripeFixtures');
 const { createMockReq, createMockRes } = require('../helpers/mockReqRes');
@@ -34,6 +40,8 @@ describe('WebhooksRouter', () => {
 
   beforeEach(() => {
     connectDB.mockResolvedValue(db);
+    captureStripeFailure.mockClear();
+    flushSentry.mockClear();
     CustomersManager.createCustomerInDB.mockResolvedValue({ success: true });
     CustomersManager.getCustomersEmailAndName.mockResolvedValue({
       success: true,
@@ -194,6 +202,26 @@ describe('WebhooksRouter', () => {
     expect(SetupPaidAlertManager.notifyTeam).toHaveBeenCalled();
     expect(EmailManager.sendEmailToCustomer).toHaveBeenCalled();
     expect(PaymentHistoryManager.createPaymentHistoryInDB).not.toHaveBeenCalled();
+    expect(flushSentry).toHaveBeenCalled();
+  });
+
+  it('checkout insert soft-failure reports to Sentry', async () => {
+    TechnicalInfoManager.insertFromSetupSession.mockResolvedValueOnce({
+      success: false,
+      error: 'null value in column "environment" of relation "technical_info" violates not-null constraint',
+    });
+    TechnicalInfoManager.getBySetupSessionId.mockResolvedValueOnce({ success: true, tenant: null });
+    await runWebhook('checkout.session.completed');
+    expect(captureStripeFailure).toHaveBeenCalledWith(
+      expect.stringContaining('environment'),
+      expect.objectContaining({
+        area: 'webhook',
+        phase: 'webhook.checkout.insert',
+        event_type: 'checkout.session.completed',
+      })
+    );
+    expect(SetupPaidAlertManager.notifyTeam).not.toHaveBeenCalled();
+    expect(flushSentry).toHaveBeenCalled();
   });
 
   it('checkout.session.completed setup replay (ON CONFLICT) does not alert again', async () => {

@@ -15,9 +15,11 @@ const ProvisionFanout = require('../utils/ProvisionFanout');
 const VaultCrypto = require('../utils/VaultCrypto');
 const crypto = require('crypto');
 const uuid = require('uuid');
-const { captureOpsError } = require('../utils/captureOpsError');
+const { captureOpsError, captureStripeFailure, flushSentry } = require('../utils/captureOpsError');
 
-
+function webhookCtx(event, phase, extra = {}) {
+    return { area: 'webhook', phase, event_type: event?.type, ...extra };
+}
 
 const WebhooksRouter = async (req, res) => {
     const event = req.event;
@@ -28,7 +30,8 @@ const WebhooksRouter = async (req, res) => {
     try {
         db = await connectDB();
     } catch (error) {
-        captureOpsError(error, { phase: 'webhook.connectDB', event_type: event?.type });
+        captureOpsError(error, webhookCtx(event, 'webhook.connectDB'));
+        await flushSentry();
         return;
     }
     // Procesar el evento de forma asíncrona
@@ -41,7 +44,8 @@ const WebhooksRouter = async (req, res) => {
                 const customer = CustomerInfo.fromStripeObject(event.data.object);
                 const result = await CustomersManager.createCustomerInDB(customer.account_id, customer.stripe_customer_id, db);
                 if (result.error) {
-                    return;
+                    captureStripeFailure(result.error, webhookCtx(event, 'webhook.customer.created'));
+                    break;
                 }
                 break;
 
@@ -51,7 +55,11 @@ const WebhooksRouter = async (req, res) => {
                     eventData = subscription; // Guardar la instancia para el email
                     const result = await SubscriptionManager.createSubscriptionInDB(subscription, db);
                     if (!result.success) {
-                        return;
+                        captureStripeFailure(
+                            result.error || 'createSubscriptionInDB failed',
+                            webhookCtx(event, 'webhook.subscription.created')
+                        );
+                        break;
                     }
                     if (subscription.technical_info_id) {
                         await TechnicalInfoManager.linkSubscription(
@@ -71,7 +79,7 @@ const WebhooksRouter = async (req, res) => {
                         db
                     );
                 } catch (error) {
-                    captureOpsError(error, { phase: 'webhook.subscription.created', event_type: event.type });
+                    captureOpsError(error, webhookCtx(event, 'webhook.subscription.created'));
                 }
                 break;
                 
@@ -102,7 +110,10 @@ const WebhooksRouter = async (req, res) => {
                         eventData = subscription; // Guardar la instancia para el email
                         const result = await SubscriptionManager.updateSubscriptionInDB(subscription, db);
                         if (!result.success) {
-                            // Error actualizando suscripción en DB
+                            captureStripeFailure(
+                                result.error || 'updateSubscriptionInDB failed',
+                                webhookCtx(event, 'webhook.subscription.updated')
+                            );
                         }
                         const fanoutTenant = await TechnicalInfoManager.getForFanout(
                             subscription.stripe_subscription_id,
@@ -118,7 +129,7 @@ const WebhooksRouter = async (req, res) => {
                         }
                     }
                 } catch (error) {
-                    captureOpsError(error, { phase: 'webhook.subscription.updated', event_type: event.type });
+                    captureOpsError(error, webhookCtx(event, 'webhook.subscription.updated'));
                 }
                 break;
                 
@@ -135,7 +146,10 @@ const WebhooksRouter = async (req, res) => {
                         db
                     );
                     if (!result.success) {
-                        // Error actualizando suscripción cancelada en DB
+                        captureStripeFailure(
+                            result.error || 'updateSubscriptionOnCancellation failed',
+                            webhookCtx(event, 'webhook.subscription.deleted')
+                        );
                     }
                     await TechnicalInfoManager.setStatusBySubscriptionId(
                         subscriptionId,
@@ -148,7 +162,7 @@ const WebhooksRouter = async (req, res) => {
                         await ProvisionFanout.notify(fanoutTenant.tenant.id, 'disable_renewal', db);
                     }
                 } catch (error) {
-                    captureOpsError(error, { phase: 'webhook.subscription.deleted', event_type: event.type });
+                    captureOpsError(error, webhookCtx(event, 'webhook.subscription.deleted'));
                 }
                 break;
                 
@@ -177,7 +191,10 @@ const WebhooksRouter = async (req, res) => {
                                 db
                             );
                             if (!result.success) {
-                                // Error actualizando suscripción en pago exitoso
+                                captureStripeFailure(
+                                    result.error || 'updateSubscriptionOnPaymentSuccess failed',
+                                    webhookCtx(event, 'webhook.payment_succeeded')
+                                );
                             }
                         }
                         await TechnicalInfoManager.setStatusBySubscriptionId(
@@ -188,7 +205,10 @@ const WebhooksRouter = async (req, res) => {
                         eventData = invoice;
                         const paymentResult = await PaymentHistoryManager.createPaymentHistoryInDB(paymentHistory, db);
                         if (!paymentResult.success) {
-                            // Error creando registro en payment_history
+                            captureStripeFailure(
+                                paymentResult.error || 'createPaymentHistoryInDB failed',
+                                webhookCtx(event, 'webhook.payment_succeeded.history')
+                            );
                         }
                         await PaymentFanout.notifyBySubscriptionId(subscriptionId, 'ok', db);
                         const cancelLookup = await SubscriptionManager.getCancelAtPeriodEnd(
@@ -222,7 +242,7 @@ const WebhooksRouter = async (req, res) => {
                         }
                     }
                 } catch (error) {
-                    captureOpsError(error, { phase: 'webhook.payment_succeeded', event_type: event.type });
+                    captureOpsError(error, webhookCtx(event, 'webhook.payment_succeeded'));
                 }
                 break;
                 
@@ -244,7 +264,10 @@ const WebhooksRouter = async (req, res) => {
                             db
                         );
                         if (!result.success) {
-                            // Error actualizando suscripción en pago fallido
+                            captureStripeFailure(
+                                result.error || 'updateSubscriptionOnPaymentFailed failed',
+                                webhookCtx(event, 'webhook.payment_failed')
+                            );
                         }
                         await TechnicalInfoManager.setStatusBySubscriptionId(
                             subscriptionId,
@@ -254,7 +277,10 @@ const WebhooksRouter = async (req, res) => {
                         eventData = invoice;
                         const paymentResult = await PaymentHistoryManager.createPaymentHistoryInDB(paymentHistory, db);
                         if (!paymentResult.success) {
-                            // Error creando registro en payment_history
+                            captureStripeFailure(
+                                paymentResult.error || 'createPaymentHistoryInDB failed',
+                                webhookCtx(event, 'webhook.payment_failed.history')
+                            );
                         }
                         await PaymentFanout.notifyBySubscriptionId(subscriptionId, 'unpaid', db);
                         const fanoutTenant = await TechnicalInfoManager.getForFanout(
@@ -278,7 +304,7 @@ const WebhooksRouter = async (req, res) => {
                         }
                     }
                 } catch (error) {
-                    captureOpsError(error, { phase: 'webhook.payment_failed', event_type: event.type });
+                    captureOpsError(error, webhookCtx(event, 'webhook.payment_failed'));
                 }
                 break;
                 
@@ -305,6 +331,13 @@ const WebhooksRouter = async (req, res) => {
                     }, db);
                     if (!inserted.success) {
                         console.error('[stripe][webhook] insert technical_info failed:', inserted.error);
+                        captureStripeFailure(
+                            inserted.error || 'insert technical_info failed',
+                            webhookCtx(event, 'webhook.checkout.insert', {
+                                setup_session_id: session.id,
+                                subdomain: metadata.subdomain,
+                            })
+                        );
                     }
                     setupPaidInserted = Boolean(inserted.success && inserted.tenant);
                     let tenant = inserted.tenant || null;
@@ -312,6 +345,13 @@ const WebhooksRouter = async (req, res) => {
                         const lookup = await TechnicalInfoManager.getBySetupSessionId(session.id, db);
                         if (!lookup.success) {
                             console.error('[stripe][webhook] lookup by setup_session failed:', lookup.error);
+                            captureStripeFailure(
+                                lookup.error || 'lookup by setup_session failed',
+                                webhookCtx(event, 'webhook.checkout.lookup', {
+                                    setup_session_id: session.id,
+                                    subdomain: metadata.subdomain,
+                                })
+                            );
                         }
                         tenant = lookup.tenant || null;
                     }
@@ -325,8 +365,27 @@ const WebhooksRouter = async (req, res) => {
                     ) {
                         const fanout = await ProvisionFanout.notify(tenant.id, 'provision', db);
                         console.log('[stripe][webhook] ProvisionFanout result', fanout);
+                        if (!fanout.success && !fanout.skipped) {
+                            captureStripeFailure(
+                                fanout.error || 'ProvisionFanout failed',
+                                webhookCtx(event, 'webhook.checkout.provision', {
+                                    technical_info_id: tenant.id,
+                                    setup_session_id: session.id,
+                                    subdomain: metadata.subdomain,
+                                })
+                            );
+                        }
                     } else {
                         console.log('[stripe][webhook] skip ProvisionFanout (tenant/status/error)');
+                        if (!tenant && inserted.success !== false) {
+                            captureStripeFailure(
+                                'checkout setup completed but tenant missing after insert/lookup',
+                                webhookCtx(event, 'webhook.checkout.no_tenant', {
+                                    setup_session_id: session.id,
+                                    subdomain: metadata.subdomain,
+                                })
+                            );
+                        }
                     }
                     if (setupPaidInserted) {
                         eventData = {
@@ -338,7 +397,7 @@ const WebhooksRouter = async (req, res) => {
                     }
                 } catch (error) {
                     console.error('[stripe][webhook] checkout.session.completed error:', error.message);
-                    captureOpsError(error, { phase: 'webhook.checkout.session.completed', event_type: event.type });
+                    captureOpsError(error, webhookCtx(event, 'webhook.checkout.session.completed'));
                 }
                 break;
 
@@ -348,7 +407,7 @@ const WebhooksRouter = async (req, res) => {
         }
         
     } catch (error) {
-        captureOpsError(error, { phase: 'webhook.switch', event_type: event?.type });
+        captureOpsError(error, webhookCtx(event, 'webhook.switch'));
     }
     
     let customerInfo = null;
@@ -407,7 +466,7 @@ const WebhooksRouter = async (req, res) => {
             }
         }
     } catch (error) {
-        captureOpsError(error, { phase: 'webhook.email', event_type: event?.type });
+        captureOpsError(error, webhookCtx(event, 'webhook.email'));
     }
 
     try {
@@ -415,7 +474,7 @@ const WebhooksRouter = async (req, res) => {
             await PaymentFailedAlertManager.notifyTeam(event, customerInfo);
         }
     } catch (error) {
-        captureOpsError(error, { phase: 'webhook.paymentFailedAlert', event_type: event?.type });
+        captureOpsError(error, webhookCtx(event, 'webhook.paymentFailedAlert'));
     }
 
     try {
@@ -423,9 +482,10 @@ const WebhooksRouter = async (req, res) => {
             await SetupPaidAlertManager.notifyTeam(event, customerInfo);
         }
     } catch (error) {
-        captureOpsError(error, { phase: 'webhook.setupPaidAlert', event_type: event?.type });
+        captureOpsError(error, webhookCtx(event, 'webhook.setupPaidAlert'));
     }
 
+    await flushSentry();
     return;
 }
 

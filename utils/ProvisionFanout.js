@@ -104,6 +104,13 @@ class ProvisionFanout {
         conn
       );
       console.error('ProvisionFanout failed', technical_info_id, action, posted.error);
+      captureOpsError(new Error(posted.error || 'provision fanout failed'), {
+        area: 'stripe',
+        phase: 'provision.fanout',
+        action,
+        technical_info_id,
+        job_id: job.id,
+      });
       return {
         success: false,
         error: posted.error,
