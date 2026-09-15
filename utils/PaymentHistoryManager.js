@@ -11,6 +11,8 @@ class PaymentHistoryManager {
                 paymentData.stripe_invoice_id,
                 paymentData.status,
                 paymentData.amount,
+                paymentData.ticket_pdf,
+                paymentData.stripe_invoice_url,
                 paymentData.created_at
             ]);
             return {

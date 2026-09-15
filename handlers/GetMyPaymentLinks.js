@@ -1,6 +1,7 @@
 const SubscriptionManager = require('../utils/SubscriptionManager');
 const CustomersManager = require('../utils/CustomersManager');
 const TechnicalInfoManager = require('../utils/TechnicalInfoManager');
+const ProductsManager = require('../utils/ProductsManager');
 const getStripeInstance = require('../data/StripeInstanceGetter');
 const { connectDB } = require('../data/connectDB');
 const { validateSubdomain } = require('../utils/SubdomainValidator');
@@ -34,6 +35,17 @@ const GetMyPaymentLinks = async (req, res) => {
         return res.status(409).json({ error: 'SUBDOMAIN_TAKEN' });
     }
 
+    const listed = await ProductsManager.list(db, true);
+    if (!listed.success) {
+        captureStripeFailure(listed.error || 'list products failed', {
+            phase: 'billing.links.listProducts',
+        });
+        return res.status(500).json({ error: listed.error || 'Error listando productos' });
+    }
+    if (!listed.products.length) {
+        return res.status(503).json({ error: 'NO_ACTIVE_PRODUCTS' });
+    }
+
     let stripe = null;
     try {
         stripe = await getStripeInstance();
@@ -58,7 +70,8 @@ const GetMyPaymentLinks = async (req, res) => {
         parsed.subdomain,
         portalUrl,
         portalUrl,
-        stripe
+        stripe,
+        listed.products
     );
 
     if (!result.success) {

@@ -7,15 +7,17 @@ class PaymentHistory {
         stripe_invoice_id = null,
         status,
         amount,
-        invoice_pdf = null,
-        created_at = new Date()
+        ticket_pdf = null,
+        created_at = new Date(),
+        stripe_invoice_url = null
     ) {
         this.id = id;
         this.stripe_subscription_id = stripe_subscription_id;
         this.stripe_invoice_id = stripe_invoice_id;
         this.status = status;
         this.amount = amount;
-        this.invoice_pdf = invoice_pdf;
+        this.ticket_pdf = ticket_pdf;
+        this.stripe_invoice_url = stripe_invoice_url;
         this.created_at = created_at;
     }
 
@@ -26,7 +28,8 @@ class PaymentHistory {
             stripe_invoice_id: this.stripe_invoice_id,
             status: this.status,
             amount: this.amount,
-            invoice_pdf: this.invoice_pdf,
+            ticket_pdf: this.ticket_pdf,
+            stripe_invoice_url: this.stripe_invoice_url,
             created_at: this.created_at
         }
     }
@@ -70,8 +73,9 @@ class PaymentHistory {
             }
         }
         
-        // Obtener invoice_pdf si está disponible
-        const invoicePdf = stripeInvoice.invoice_pdf || null;
+        // Stripe llama invoice_pdf al PDF del cobro; en DB es ticket_pdf.
+        const ticketPdf = stripeInvoice.invoice_pdf || null;
+        const stripeInvoiceUrl = stripeInvoice.hosted_invoice_url || null;
         
         return new PaymentHistory(
             uuid.v4(),
@@ -79,11 +83,11 @@ class PaymentHistory {
             stripeInvoice.id,
             stripeInvoice.status,
             amount,
-            invoicePdf,
-            new Date(stripeInvoice.created * 1000)
+            ticketPdf,
+            new Date(stripeInvoice.created * 1000),
+            stripeInvoiceUrl
         );
     }
 }
 
 module.exports = PaymentHistory;
-

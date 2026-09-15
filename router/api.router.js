@@ -28,6 +28,9 @@ const RetryProvision = require('../handlers/RetryProvision');
 const ListJobs = require('../handlers/ListJobs');
 const GetJob = require('../handlers/GetJob');
 const RetryJob = require('../handlers/RetryJob');
+const ListProducts = require('../handlers/ListProducts');
+const CreateProduct = require('../handlers/CreateProduct');
+const UpdateProduct = require('../handlers/UpdateProduct');
 
 router.use(PathSecurityValidator.middleware());
 
@@ -60,6 +63,10 @@ router.delete("/tenants/:id", ...withAdmin, TechnicalInfoExistByID, DeleteTenant
 router.get("/jobs", ...withAdmin, ListJobs);
 router.get("/jobs/:id", ...withAdmin, GetJob);
 router.post("/jobs/:id/retry", ...withAdmin, RetryJob);
+
+router.get("/products", ...withAdmin, ListProducts);
+router.post("/products", ...withAdmin, CreateProduct);
+router.patch("/products/:id", ...withAdmin, UpdateProduct);
 
 router.use((req, res) => {
     return res.status(404).json({

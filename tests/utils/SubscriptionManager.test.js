@@ -54,7 +54,6 @@ describe('SubscriptionManager', () => {
   });
 
   it('createSetupPaymentLinks enables promotion codes', async () => {
-    process.env.STRIPE_PRICE_ID_SETUP = 'price_setup';
     const stripe = {
       checkout: {
         sessions: {
@@ -65,24 +64,60 @@ describe('SubscriptionManager', () => {
         },
       },
     };
+    const products = [
+      {
+        id: 'p1',
+        name: 'Básico',
+        description: 'desc',
+        monthly_amount: 1699,
+        setup_amount: 500,
+        stripe_price_id_setup: 'price_setup_1',
+      },
+      {
+        id: 'p2',
+        name: 'Premium',
+        description: 'desc2',
+        monthly_amount: 2699,
+        setup_amount: 500,
+        stripe_price_id_setup: 'price_setup_2',
+      },
+    ];
     const result = await SubscriptionManager.createSetupPaymentLinks(
       'cus_1',
       'acc_1',
       'mi-sucursal',
       'https://ok',
       'https://cancel',
-      stripe
+      stripe,
+      products
     );
     expect(result.success).toBe(true);
+    expect(result.paymentLinks).toHaveLength(2);
+    expect(result.paymentLinks[0].url).toBe('https://setup-basico');
     expect(stripe.checkout.sessions.create).toHaveBeenCalledTimes(2);
     expect(stripe.checkout.sessions.create).toHaveBeenNthCalledWith(
       1,
-      expect.objectContaining({ allow_promotion_codes: true, mode: 'payment' })
+      expect.objectContaining({
+        allow_promotion_codes: true,
+        mode: 'payment',
+        line_items: [{ price: 'price_setup_1', quantity: 1 }],
+      })
     );
-    expect(stripe.checkout.sessions.create).toHaveBeenNthCalledWith(
-      2,
-      expect.objectContaining({ allow_promotion_codes: true, mode: 'payment' })
+  });
+
+  it('createSetupPaymentLinks fails without products', async () => {
+    const stripe = { checkout: { sessions: { create: jest.fn() } } };
+    const result = await SubscriptionManager.createSetupPaymentLinks(
+      'cus_1',
+      'acc_1',
+      'mi-sucursal',
+      null,
+      null,
+      stripe,
+      []
     );
+    expect(result.success).toBe(false);
+    expect(stripe.checkout.sessions.create).not.toHaveBeenCalled();
   });
 
   it('getCancelAtPeriodEnd returns flag from row', async () => {
