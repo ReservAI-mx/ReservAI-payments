@@ -4,11 +4,26 @@ const { captureStripeFailure } = require('../utils/captureOpsError');
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+function resolveAccountId(req) {
+  if (req.params.account_id) {
+    if (!UUID_RE.test(String(req.params.account_id))) {
+      return { error: 'account_id inválido' };
+    }
+    return { accountId: req.params.account_id };
+  }
+  return { accountId: req.account.id };
+}
+
 function makeDownloadHandler(kind) {
   return async (req, res) => {
     const invoiceId = req.params.id;
     if (!UUID_RE.test(String(invoiceId || ''))) {
       return res.status(400).json({ error: 'id inválido' });
+    }
+
+    const resolved = resolveAccountId(req);
+    if (resolved.error) {
+      return res.status(400).json({ error: resolved.error });
     }
 
     let db = null;
@@ -21,7 +36,7 @@ function makeDownloadHandler(kind) {
 
     const result = await InvoiceManager.downloadFile(
       invoiceId,
-      req.account.id,
+      resolved.accountId,
       kind,
       db
     );

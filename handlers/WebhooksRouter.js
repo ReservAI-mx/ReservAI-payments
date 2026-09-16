@@ -12,7 +12,9 @@ const SetupPaidAlertManager = require('../utils/SetupPaidAlertManager');
 const TechnicalInfoManager = require('../utils/TechnicalInfoManager');
 const PaymentFanout = require('../utils/PaymentFanout');
 const ProvisionFanout = require('../utils/ProvisionFanout');
+const InvoiceManager = require('../utils/InvoiceManager');
 const VaultCrypto = require('../utils/VaultCrypto');
+const getStripeInstance = require('../data/StripeInstanceGetter');
 const crypto = require('crypto');
 const uuid = require('uuid');
 const { captureOpsError, captureStripeFailure, flushSentry } = require('../utils/captureOpsError');
@@ -27,6 +29,7 @@ const WebhooksRouter = async (req, res) => {
     let db = null;
     let eventData = null; // Variable para almacenar la instancia creada (Subscription o PaymentHistory)
     let setupPaidInserted = false;
+    let cfdiDocumentsEmailSent = false;
     try {
         db = await connectDB();
     } catch (error) {
@@ -209,6 +212,64 @@ const WebhooksRouter = async (req, res) => {
                                 paymentResult.error || 'createPaymentHistoryInDB failed',
                                 webhookCtx(event, 'webhook.payment_succeeded.history')
                             );
+                        } else {
+                            try {
+                                const accountLookup =
+                                    await InvoiceManager.getAccountAndPlanBySubscriptionId(
+                                        subscriptionId,
+                                        db
+                                    );
+                                const accountId = accountLookup.row?.account_id;
+                                if (accountId) {
+                                    const paymentId =
+                                        paymentResult.payment?.id || paymentHistory.id;
+                                    const customerLookup =
+                                        await CustomersManager.getCustomersEmailAndName(
+                                            customerId,
+                                            db
+                                        );
+                                    const auto = await InvoiceManager.notifyPaymentDocuments({
+                                        accountId,
+                                        paymentHistoryId: paymentId,
+                                        customerEmail: customerLookup.success
+                                            ? customerLookup.email
+                                            : null,
+                                        customerName: customerLookup.success
+                                            ? customerLookup.name
+                                            : null,
+                                        stripePdfUrl:
+                                            invoice.invoice_pdf || paymentHistory.ticket_pdf,
+                                        meta: {
+                                            amount_paid: invoice.amount_paid,
+                                            number: invoice.number,
+                                            currency: invoice.currency,
+                                            hosted_invoice_url: invoice.hosted_invoice_url,
+                                            invoice_pdf: invoice.invoice_pdf,
+                                            period_start: invoice.period_start,
+                                            period_end: invoice.period_end,
+                                        },
+                                        plannedPlan: accountLookup.row?.planned_plan || null,
+                                        db,
+                                    });
+                                    if (auto.emailed) {
+                                        cfdiDocumentsEmailSent = true;
+                                    } else if (auto.error) {
+                                        captureStripeFailure(
+                                            auto.error,
+                                            webhookCtx(event, 'webhook.payment_succeeded.cfdi')
+                                        );
+                                    } else if (auto.skipped) {
+                                        console.log(
+                                            `[stripe][webhook] auto CFDI skipped reason=${auto.reason} sub=${subscriptionId}`
+                                        );
+                                    }
+                                }
+                            } catch (cfdiError) {
+                                captureOpsError(
+                                    cfdiError,
+                                    webhookCtx(event, 'webhook.payment_succeeded.cfdi')
+                                );
+                            }
                         }
                         await PaymentFanout.notifyBySubscriptionId(subscriptionId, 'ok', db);
                         const cancelLookup = await SubscriptionManager.getCancelAtPeriodEnd(
@@ -387,6 +448,96 @@ const WebhooksRouter = async (req, res) => {
                             );
                         }
                     }
+                    // Cobro setup: payment_history + CFDI (mismo criterio que suscripción)
+                    try {
+                        let invoiceExtras = {};
+                        const invoiceRef =
+                            typeof session.invoice === 'string'
+                                ? session.invoice
+                                : session.invoice?.id || null;
+                        if (invoiceRef) {
+                            try {
+                                const stripe = await getStripeInstance();
+                                const inv = await stripe.invoices.retrieve(invoiceRef);
+                                invoiceExtras = {
+                                    invoice_pdf: inv.invoice_pdf || null,
+                                    hosted_invoice_url: inv.hosted_invoice_url || null,
+                                    number: inv.number || null,
+                                };
+                            } catch (invErr) {
+                                captureStripeFailure(
+                                    invErr.message || 'retrieve setup invoice failed',
+                                    webhookCtx(event, 'webhook.checkout.invoice')
+                                );
+                            }
+                        }
+
+                        const setupPayment = PaymentHistory.fromStripeCheckoutSession(
+                            session,
+                            invoiceExtras
+                        );
+                        const paymentResult =
+                            await PaymentHistoryManager.createPaymentHistoryInDB(
+                                setupPayment,
+                                db
+                            );
+                        if (!paymentResult.success) {
+                            const dup =
+                                /unique|duplicate/i.test(String(paymentResult.error || ''));
+                            if (!dup) {
+                                captureStripeFailure(
+                                    paymentResult.error || 'setup payment_history failed',
+                                    webhookCtx(event, 'webhook.checkout.history')
+                                );
+                            }
+                        } else if (metadata.account_id) {
+                            const customerLookup =
+                                await CustomersManager.getCustomersEmailAndName(
+                                    session.customer,
+                                    db
+                                );
+                            const auto = await InvoiceManager.notifyPaymentDocuments({
+                                accountId: metadata.account_id,
+                                paymentHistoryId:
+                                    paymentResult.payment?.id || setupPayment.id,
+                                customerEmail: customerLookup.success
+                                    ? customerLookup.email
+                                    : null,
+                                customerName: customerLookup.success
+                                    ? customerLookup.name
+                                    : null,
+                                stripePdfUrl:
+                                    invoiceExtras.invoice_pdf || setupPayment.ticket_pdf,
+                                meta: {
+                                    amount_paid: session.amount_total,
+                                    number: invoiceExtras.number || session.id,
+                                    currency: session.currency,
+                                    hosted_invoice_url: invoiceExtras.hosted_invoice_url,
+                                    invoice_pdf: invoiceExtras.invoice_pdf,
+                                },
+                                plannedPlan: metadata.planned_plan || null,
+                                db,
+                            });
+                            if (auto.emailed) {
+                                cfdiDocumentsEmailSent = true;
+                            } else if (auto.error) {
+                                captureStripeFailure(
+                                    auto.error,
+                                    webhookCtx(event, 'webhook.checkout.cfdi')
+                                );
+                            } else if (auto.skipped) {
+                                console.log(
+                                    `[stripe][webhook] setup auto CFDI skipped reason=${auto.reason} cs=${session.id}`
+                                );
+                            }
+                        }
+                    } catch (setupBillErr) {
+                        captureOpsError(
+                            setupBillErr,
+                            webhookCtx(event, 'webhook.checkout.billing')
+                        );
+                    }
+
                     if (setupPaidInserted) {
                         eventData = {
                             amount_total: session.amount_total,
@@ -430,7 +581,7 @@ const WebhooksRouter = async (req, res) => {
                 }
             }
 
-            if (customerInfo && eventData) {
+            if (customerInfo && eventData && !cfdiDocumentsEmailSent) {
                 let emailData = null;
                 if (eventData instanceof Subscription) {
                     const subscriptionJSON = eventData.toJSON();

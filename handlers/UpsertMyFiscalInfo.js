@@ -24,7 +24,10 @@ const UpsertMyFiscalInfo = async (req, res) => {
 
   if (!result.success) {
     if (result.status === 400) {
-      return res.status(400).json({ error: result.error });
+      return res.status(400).json({
+        error: result.error,
+        sat_validation: result.sat_validation,
+      });
     }
     captureStripeFailure(result.error, { phase: 'billing.fiscal.put' });
     return res.status(500).json({ error: result.error || 'Internal server error' });
@@ -32,6 +35,7 @@ const UpsertMyFiscalInfo = async (req, res) => {
 
   return res.status(200).json({
     data: FiscalInfoManager.toPublic(result.fiscal),
+    sat_validation: result.sat_validation,
     message: 'información fiscal guardada',
   });
 };

@@ -323,6 +323,7 @@ class SubscriptionManager {
                         mode: 'payment',
                         line_items: [{ price: priceId, quantity: 1 }],
                         allow_promotion_codes: true,
+                        invoice_creation: { enabled: true },
                         metadata: {
                             ...baseMetadata,
                             planned_plan: product.name,

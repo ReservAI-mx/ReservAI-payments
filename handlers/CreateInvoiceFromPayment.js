@@ -4,10 +4,25 @@ const { captureStripeFailure } = require('../utils/captureOpsError');
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+function resolveAccountId(req) {
+  if (req.params.account_id) {
+    if (!UUID_RE.test(String(req.params.account_id))) {
+      return { error: 'account_id inválido' };
+    }
+    return { accountId: req.params.account_id };
+  }
+  return { accountId: req.account.id };
+}
+
 const CreateInvoiceFromPayment = async (req, res) => {
   const paymentHistoryId = req.params.payment_history_id;
   if (!UUID_RE.test(String(paymentHistoryId || ''))) {
     return res.status(400).json({ error: 'payment_history_id inválido' });
+  }
+
+  const resolved = resolveAccountId(req);
+  if (resolved.error) {
+    return res.status(400).json({ error: resolved.error });
   }
 
   let db = null;
@@ -19,7 +34,7 @@ const CreateInvoiceFromPayment = async (req, res) => {
   }
 
   const result = await InvoiceManager.createFromPayment(
-    req.account.id,
+    resolved.accountId,
     paymentHistoryId,
     req.account.email,
     db

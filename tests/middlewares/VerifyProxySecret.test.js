@@ -10,7 +10,7 @@ describe('VerifyProxySecret', () => {
     expect(next).toHaveBeenCalled();
   });
 
-  it('skips /webhooks/stripe even when secret is configured', () => {
+  it('requires proxy secret on /webhooks/stripe when configured', () => {
     const prevEnv = process.env.NODE_ENV;
     const prevSecret = process.env.PROXY_SECRET_HEADER;
     process.env.NODE_ENV = 'development';
@@ -18,13 +18,43 @@ describe('VerifyProxySecret', () => {
     global.IS_PRODUCTION = false;
     try {
       const req = createMockReq({ originalUrl: '/webhooks/stripe', path: '/stripe' });
+      const res = createMockRes();
+      const next = createMockNext();
+      VerifyProxySecret(req, res, next);
+      expect(res.status).toHaveBeenCalledWith(403);
+      expect(next).not.toHaveBeenCalled();
+    } finally {
+      process.env.NODE_ENV = prevEnv;
+      if (prevSecret === undefined) delete process.env.PROXY_SECRET_HEADER;
+      else process.env.PROXY_SECRET_HEADER = prevSecret;
+    }
+  });
+
+  it('accepts /webhooks/stripe with valid proxy secret', () => {
+    const prevEnv = process.env.NODE_ENV;
+    const prevSecret = process.env.PROXY_SECRET_HEADER;
+    const prevHeaderName = process.env.PROXY_SECRET_HEADER_NAME;
+    process.env.NODE_ENV = 'development';
+    process.env.PROXY_SECRET_HEADER = 'expected-secret';
+    delete process.env.PROXY_SECRET_HEADER_NAME;
+    global.IS_PRODUCTION = false;
+    try {
+      const header = VerifyProxySecret.headerName();
+      const req = createMockReq({
+        originalUrl: '/webhooks/stripe',
+        path: '/stripe',
+        headers: { [header]: 'expected-secret' },
+      });
       const next = createMockNext();
       VerifyProxySecret(req, createMockRes(), next);
+      expect(req.proxyVerified).toBe(true);
       expect(next).toHaveBeenCalled();
     } finally {
       process.env.NODE_ENV = prevEnv;
       if (prevSecret === undefined) delete process.env.PROXY_SECRET_HEADER;
       else process.env.PROXY_SECRET_HEADER = prevSecret;
+      if (prevHeaderName === undefined) delete process.env.PROXY_SECRET_HEADER_NAME;
+      else process.env.PROXY_SECRET_HEADER_NAME = prevHeaderName;
     }
   });
 

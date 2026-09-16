@@ -99,6 +99,7 @@ describe('SubscriptionManager', () => {
       1,
       expect.objectContaining({
         allow_promotion_codes: true,
+        invoice_creation: { enabled: true },
         mode: 'payment',
         line_items: [{ price: 'price_setup_1', quantity: 1 }],
       })

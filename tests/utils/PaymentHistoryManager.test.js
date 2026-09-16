@@ -10,5 +10,6 @@ describe('PaymentHistoryManager', () => {
     const result = await PaymentHistoryManager.createPaymentHistoryInDB(ph, db);
     expect(result.success).toBe(true);
     expect(db.query).toHaveBeenCalled();
+    expect(String(db.query.mock.calls[0][0])).toMatch(/ON CONFLICT \(stripe_invoice_id\)/);
   });
 });

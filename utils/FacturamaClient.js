@@ -3,6 +3,11 @@ class FacturamaClient {
     return (process.env.FACTURAMA_BASE_URL || 'https://apisandbox.facturama.mx').replace(/\/$/, '');
   }
 
+  /** Facturama sandbox no consulta el SAT real para receptores arbitrarios. */
+  static isSandbox() {
+    return /apisandbox\.facturama\.mx/i.test(FacturamaClient.baseUrl());
+  }
+
   static authHeader() {
     const user = process.env.FACTURAMA_USER;
     const password = process.env.FACTURAMA_PASSWORD;
@@ -62,6 +67,34 @@ class FacturamaClient {
         buffer: Buffer.from(data.Content, 'base64'),
         contentType: data.ContentType || format,
       };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  }
+
+  /** Valida receptor (RFC, nombre, CP, régimen) ante el SAT vía Facturama. */
+  static async validateReceiver(payload) {
+    try {
+      const response = await fetch(
+        `${FacturamaClient.baseUrl()}/api/customers/validate`,
+        {
+          method: 'POST',
+          headers: {
+            Authorization: FacturamaClient.authHeader(),
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(payload),
+        }
+      );
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        return {
+          success: false,
+          error: typeof data === 'object' ? JSON.stringify(data) : String(data),
+          status: response.status,
+        };
+      }
+      return { success: true, data };
     } catch (error) {
       return { success: false, error: error.message };
     }

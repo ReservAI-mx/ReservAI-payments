@@ -33,15 +33,14 @@ function shouldSkipPath(req) {
   const raw = (req.originalUrl || req.url || '').split('?')[0];
   if (SKIP_PATHS.has(raw)) return true;
   if (req.path && SKIP_PATHS.has(req.path)) return true;
-  // Stripe CLI / Dashboard no envían X-Proxy-Secret. La firma v1 cubre el path.
-  if (raw === '/webhooks' || raw.startsWith('/webhooks/')) return true;
-  if (req.path === '/webhooks' || (req.path && req.path.startsWith('/webhooks/'))) return true;
   return false;
 }
 
 /**
  * Exige el secreto compartido con reservAI_gateway (nginx).
  * Acceso directo al servicio sin pasar por el gateway → 403.
+ * Incluye /webhooks/stripe: el gateway inyecta X-Proxy-Secret; Stripe CLI
+ * debe apuntar a :8080 (no a :3001).
  */
 function VerifyProxySecret(req, res, next) {
   if (process.env.NODE_ENV === 'test') {

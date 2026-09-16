@@ -9,7 +9,9 @@ jest.mock('../../utils/SetupPaidAlertManager');
 jest.mock('../../utils/TechnicalInfoManager');
 jest.mock('../../utils/PaymentFanout');
 jest.mock('../../utils/ProvisionFanout');
+jest.mock('../../utils/InvoiceManager');
 jest.mock('../../utils/VaultCrypto');
+jest.mock('../../data/StripeInstanceGetter');
 jest.mock('../../utils/captureOpsError', () => ({
   captureOpsError: jest.fn((e) => (e instanceof Error ? e : new Error(String(e)))),
   captureStripeFailure: jest.fn((e) => (e instanceof Error ? e : new Error(String(e)))),
@@ -27,7 +29,9 @@ const SetupPaidAlertManager = require('../../utils/SetupPaidAlertManager');
 const TechnicalInfoManager = require('../../utils/TechnicalInfoManager');
 const PaymentFanout = require('../../utils/PaymentFanout');
 const ProvisionFanout = require('../../utils/ProvisionFanout');
+const InvoiceManager = require('../../utils/InvoiceManager');
 const VaultCrypto = require('../../utils/VaultCrypto');
+const getStripeInstance = require('../../data/StripeInstanceGetter');
 const { captureStripeFailure, flushSentry } = require('../../utils/captureOpsError');
 const WebhooksRouter = require('../../handlers/WebhooksRouter');
 const { loadStripeFixture } = require('../helpers/stripeFixtures');
@@ -57,7 +61,10 @@ describe('WebhooksRouter', () => {
       success: true,
       cancel_at_period_end: false,
     });
-    PaymentHistoryManager.createPaymentHistoryInDB.mockResolvedValue({ success: true });
+    PaymentHistoryManager.createPaymentHistoryInDB.mockResolvedValue({
+      success: true,
+      payment: { id: 'ph-1' },
+    });
     EmailContentManager.getEmailContent.mockResolvedValue({
       subject: 'Subj',
       content: '<p>Hi</p>',
@@ -81,6 +88,20 @@ describe('WebhooksRouter', () => {
     PaymentFanout.notifyBySubscriptionId.mockResolvedValue();
     ProvisionFanout.notify.mockResolvedValue({ success: true });
     VaultCrypto.encrypt.mockReturnValue('{"keyId":"v1"}');
+
+    InvoiceManager.getAccountAndPlanBySubscriptionId.mockResolvedValue({
+      success: true,
+      row: { account_id: 'acc-1', planned_plan: 'Pro' },
+    });
+    InvoiceManager.notifyPaymentDocuments.mockResolvedValue({
+      stamped: false,
+      emailed: false,
+      skipped: true,
+      reason: 'FISCAL_NOT_READY',
+    });
+    getStripeInstance.mockResolvedValue({
+      invoices: { retrieve: jest.fn().mockResolvedValue({}) },
+    });
   });
 
   async function runWebhook(fixtureName) {
@@ -133,7 +154,42 @@ describe('WebhooksRouter', () => {
     expect(SubscriptionManager.updateSubscriptionOnPaymentSuccess).toHaveBeenCalled();
     expect(PaymentHistoryManager.createPaymentHistoryInDB).toHaveBeenCalled();
     expect(EmailManager.sendEmailToCustomer).toHaveBeenCalled();
+    expect(InvoiceManager.notifyPaymentDocuments).toHaveBeenCalled();
     expect(ProvisionFanout.notify).toHaveBeenCalledWith('ti-1', 'enable_renewal', db);
+  });
+
+  it('invoice.payment_succeeded stamps CFDI and skips generic email when emailed', async () => {
+    InvoiceManager.notifyPaymentDocuments.mockResolvedValue({
+      stamped: true,
+      emailed: true,
+      skipped: false,
+    });
+
+    await runWebhook('invoice.payment_succeeded');
+
+    expect(InvoiceManager.notifyPaymentDocuments).toHaveBeenCalledWith(
+      expect.objectContaining({
+        accountId: 'acc-1',
+        paymentHistoryId: 'ph-1',
+        customerEmail: 'u@example.com',
+      })
+    );
+    expect(EmailManager.sendEmailToCustomer).not.toHaveBeenCalled();
+  });
+
+  it('invoice.payment_succeeded keeps history when Facturama stamp fails', async () => {
+    InvoiceManager.notifyPaymentDocuments.mockResolvedValue({
+      stamped: false,
+      emailed: false,
+      skipped: false,
+      error: 'FACTURAMA_STAMP_FAILED',
+    });
+
+    await runWebhook('invoice.payment_succeeded');
+
+    expect(PaymentHistoryManager.createPaymentHistoryInDB).toHaveBeenCalled();
+    expect(EmailManager.sendEmailToCustomer).toHaveBeenCalled();
+    expect(captureStripeFailure).toHaveBeenCalled();
   });
 
   it('invoice.payment_failed marks unpaid, records history and alerts the team', async () => {
@@ -201,8 +257,31 @@ describe('WebhooksRouter', () => {
     expect(ProvisionFanout.notify).toHaveBeenCalledWith('ti-1', 'provision', db);
     expect(SetupPaidAlertManager.notifyTeam).toHaveBeenCalled();
     expect(EmailManager.sendEmailToCustomer).toHaveBeenCalled();
-    expect(PaymentHistoryManager.createPaymentHistoryInDB).not.toHaveBeenCalled();
+    expect(PaymentHistoryManager.createPaymentHistoryInDB).toHaveBeenCalled();
+    expect(InvoiceManager.notifyPaymentDocuments).toHaveBeenCalledWith(
+      expect.objectContaining({
+        accountId: '00000000-0000-4000-8000-000000000001',
+        plannedPlan: 'basico',
+      })
+    );
     expect(flushSentry).toHaveBeenCalled();
+  });
+
+  it('checkout.session.completed setup with fiscal ready sends CFDI docs and skips setup email', async () => {
+    TechnicalInfoManager.insertFromSetupSession.mockResolvedValueOnce({
+      success: true,
+      tenant: { id: 'ti-1', status: 'pending_provision', provision_error: null },
+    });
+    InvoiceManager.notifyPaymentDocuments.mockResolvedValue({
+      stamped: true,
+      emailed: true,
+      skipped: false,
+    });
+    await runWebhook('checkout.session.completed');
+    expect(PaymentHistoryManager.createPaymentHistoryInDB).toHaveBeenCalled();
+    expect(InvoiceManager.notifyPaymentDocuments).toHaveBeenCalled();
+    expect(EmailManager.sendEmailToCustomer).not.toHaveBeenCalled();
+    expect(SetupPaidAlertManager.notifyTeam).toHaveBeenCalled();
   });
 
   it('checkout insert soft-failure reports to Sentry', async () => {
@@ -230,10 +309,16 @@ describe('WebhooksRouter', () => {
       success: true,
       tenant: { id: 'ti-1', status: 'pending_provision', provision_error: 'dns_apex: x' },
     });
+    PaymentHistoryManager.createPaymentHistoryInDB.mockResolvedValueOnce({
+      success: false,
+      error: 'duplicate key value violates unique constraint',
+    });
     await runWebhook('checkout.session.completed');
     expect(SetupPaidAlertManager.notifyTeam).not.toHaveBeenCalled();
     expect(EmailManager.sendEmailToCustomer).not.toHaveBeenCalled();
     expect(ProvisionFanout.notify).not.toHaveBeenCalled();
+    expect(PaymentHistoryManager.createPaymentHistoryInDB).toHaveBeenCalled();
+    expect(InvoiceManager.notifyPaymentDocuments).not.toHaveBeenCalled();
   });
 
   it('customer.subscription.updated with cancellation disables renewal', async () => {

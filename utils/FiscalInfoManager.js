@@ -1,10 +1,12 @@
 const GetFiscalByAccountId = require('../queries/GetFiscalByAccountId');
 const InsertFiscalInfo = require('../queries/InsertFiscalInfo');
 const UpdateFiscalInfo = require('../queries/UpdateFiscalInfo');
+const UpdateFiscalSatValidation = require('../queries/UpdateFiscalSatValidation');
 const SetFiscalActive = require('../queries/SetFiscalActive');
 const SoftDeleteFiscalInfo = require('../queries/SoftDeleteFiscalInfo');
 const HardDeleteFiscalInfo = require('../queries/HardDeleteFiscalInfo');
 const CountInvoicesByFiscalId = require('../queries/CountInvoicesByFiscalId');
+const FacturamaClient = require('./FacturamaClient');
 
 const TERMS_VERSION = 'fiscal-disclaimer-v1';
 
@@ -59,7 +61,8 @@ class FiscalInfoManager {
     }
 
     const rfc = body.rfc != null ? String(body.rfc).trim().toUpperCase() : '';
-    const razon_social = body.razon_social != null ? String(body.razon_social).trim() : '';
+    const razon_social =
+      body.razon_social != null ? String(body.razon_social).trim().toUpperCase() : '';
     const codigo_postal = body.codigo_postal != null ? String(body.codigo_postal).trim() : '';
     const regimen_fiscal = body.regimen_fiscal != null ? String(body.regimen_fiscal).trim() : '';
     const uso_cfdi =
@@ -99,6 +102,106 @@ class FiscalInfoManager {
     }
   }
 
+  /** Interpreta respuesta de POST /api/customers/validate. */
+  static interpretSatValidation(validateResult) {
+    if (!validateResult || !validateResult.success) {
+      return {
+        status: 'error',
+        detail: JSON.stringify({
+          error: validateResult?.error || 'FACTURAMA_VALIDATE_FAILED',
+          http_status: validateResult?.status || null,
+        }),
+      };
+    }
+    const data = validateResult.data || {};
+    const allMatch =
+      data.ExistRfc === true &&
+      data.MatchName === true &&
+      data.MatchZipCode === true &&
+      data.MatchFiscalRegime === true;
+    return {
+      status: allMatch ? 'valid' : 'invalid',
+      detail: JSON.stringify(data),
+    };
+  }
+
+  /**
+   * En sandbox, POST /customers/validate solo reconoce RFCs de prueba (p.ej. EKU9003173C9).
+   * RFCs reales del SAT devuelven ExistRfc=false aunque la CSF sea correcta.
+   */
+  static maybeRelaxSandboxSat(sat, validateResult) {
+    if (!FacturamaClient.isSandbox()) return sat;
+    if (process.env.FACTURAMA_SAT_VALIDATE_STRICT === 'true') return sat;
+    if (sat.status !== 'invalid') return sat;
+
+    const data = validateResult?.data || {};
+    if (data.ExistRfc !== false) return sat;
+
+    return {
+      status: 'valid',
+      detail: JSON.stringify({
+        sandbox_relaxed: true,
+        note:
+          'Sandbox Facturama no valida RFCs reales ante el SAT. En producción se validará de verdad.',
+        facturama_response: data,
+      }),
+    };
+  }
+
+  /** Mensajes legibles para API/UI a partir del resultado SAT. */
+  static describeSatValidation(sat) {
+    if (!sat) {
+      return { status: 'error', messages: ['No se pudo validar con Facturama.'] };
+    }
+    if (sat.status === 'valid') {
+      try {
+        const detail = JSON.parse(sat.detail || '{}');
+        if (detail.sandbox_relaxed) {
+          return {
+            status: 'valid',
+            messages: [
+              detail.note ||
+                'Validación local OK. Sandbox Facturama no consulta el SAT real.',
+            ],
+          };
+        }
+      } catch {
+        // ignore parse errors
+      }
+      return { status: 'valid', messages: ['Validación SAT correcta.'] };
+    }
+    if (sat.status === 'error') {
+      let message = 'No se pudo validar con Facturama.';
+      try {
+        const detail = JSON.parse(sat.detail || '{}');
+        if (detail.error) {
+          message = `No se pudo validar con Facturama: ${detail.error}`;
+        }
+      } catch {
+        // ignore parse errors
+      }
+      return { status: 'error', messages: [message] };
+    }
+
+    const messages = [];
+    let data = {};
+    try {
+      data = JSON.parse(sat.detail || '{}');
+    } catch {
+      // ignore parse errors
+    }
+    if (data.ExistRfc === false) messages.push('RFC no localizado o inactivo en el SAT.');
+    if (data.MatchName === false) messages.push('La razón social no coincide con el RFC.');
+    if (data.MatchZipCode === false) messages.push('El código postal fiscal no coincide.');
+    if (data.MatchFiscalRegime === false) {
+      messages.push('El régimen fiscal no coincide con el RFC.');
+    }
+    if (messages.length === 0) {
+      messages.push('Los datos fiscales no coinciden con el SAT.');
+    }
+    return { status: 'invalid', messages };
+  }
+
   static async upsert(accountId, body, meta, db) {
     const parsed = FiscalInfoManager.validateUpsertInput(body);
     if (parsed.error) {
@@ -112,6 +215,25 @@ class FiscalInfoManager {
       const existing = await FiscalInfoManager.getByAccountId(accountId, db);
       if (!existing.success) {
         return { success: false, error: existing.error, status: 500 };
+      }
+
+      const validated = await FacturamaClient.validateReceiver({
+        Rfc: parsed.rfc,
+        Name: parsed.razon_social,
+        ZipCode: parsed.codigo_postal,
+        FiscalRegime: parsed.regimen_fiscal,
+      });
+      let sat = FiscalInfoManager.interpretSatValidation(validated);
+      sat = FiscalInfoManager.maybeRelaxSandboxSat(sat, validated);
+      const sat_validation = FiscalInfoManager.describeSatValidation(sat);
+
+      if (sat.status === 'invalid') {
+        return {
+          success: false,
+          error: 'SAT_VALIDATION_FAILED',
+          status: 400,
+          sat_validation,
+        };
       }
 
       const params = [
@@ -136,7 +258,19 @@ class FiscalInfoManager {
         row = inserted.rows[0];
       }
 
-      return { success: true, fiscal: row };
+      const satUpdated = await db.query(UpdateFiscalSatValidation, [
+        row.id,
+        sat.status,
+        sat.detail,
+      ]);
+      row = satUpdated.rows[0] || row;
+
+      if (sat.status === 'error' && existing.fiscal?.active) {
+        const deactivated = await db.query(SetFiscalActive, [row.id, false]);
+        row = deactivated.rows[0] || { ...row, active: false };
+      }
+
+      return { success: true, fiscal: row, sat_validation };
     } catch (error) {
       return { success: false, error: error.message, status: 500 };
     }
@@ -154,11 +288,47 @@ class FiscalInfoManager {
       if (active === true && !existing.fiscal.authorization_accepted) {
         return { success: false, error: 'DISCLAIMER_REQUIRED', status: 400 };
       }
+      if (active === true && existing.fiscal.sat_validation_status !== 'valid') {
+        return { success: false, error: 'SAT_VALIDATION_REQUIRED', status: 400 };
+      }
 
       const result = await db.query(SetFiscalActive, [existing.fiscal.id, !!active]);
       return { success: true, fiscal: result.rows[0] };
     } catch (error) {
       return { success: false, error: error.message, status: 500 };
+    }
+  }
+
+  /**
+   * Revalida receptor en Facturama y persiste sat_validation_*.
+   * Útil cuando el perfil quedó en pending (p.ej. activado antes del gate SAT).
+   */
+  static async refreshSatValidation(accountId, db) {
+    const looked = await FiscalInfoManager.getByAccountId(accountId, db);
+    if (!looked.success) {
+      return { success: false, error: looked.error };
+    }
+    if (!looked.fiscal) {
+      return { success: false, error: 'FISCAL_NOT_FOUND' };
+    }
+    const fiscal = looked.fiscal;
+    const validated = await FacturamaClient.validateReceiver({
+      Rfc: fiscal.rfc,
+      Name: fiscal.razon_social,
+      ZipCode: fiscal.codigo_postal,
+      FiscalRegime: fiscal.regimen_fiscal,
+    });
+    let sat = FiscalInfoManager.interpretSatValidation(validated);
+    sat = FiscalInfoManager.maybeRelaxSandboxSat(sat, validated);
+    try {
+      const updated = await db.query(UpdateFiscalSatValidation, [
+        fiscal.id,
+        sat.status,
+        sat.detail,
+      ]);
+      return { success: true, fiscal: updated.rows[0] || fiscal, sat_status: sat.status };
+    } catch (error) {
+      return { success: false, error: error.message };
     }
   }
 

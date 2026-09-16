@@ -9,7 +9,9 @@ class PaymentHistory {
         amount,
         ticket_pdf = null,
         created_at = new Date(),
-        stripe_invoice_url = null
+        stripe_invoice_url = null,
+        stripe_customer_id = null,
+        stripe_checkout_session_id = null
     ) {
         this.id = id;
         this.stripe_subscription_id = stripe_subscription_id;
@@ -19,6 +21,8 @@ class PaymentHistory {
         this.ticket_pdf = ticket_pdf;
         this.stripe_invoice_url = stripe_invoice_url;
         this.created_at = created_at;
+        this.stripe_customer_id = stripe_customer_id;
+        this.stripe_checkout_session_id = stripe_checkout_session_id;
     }
 
     toJSON() {
@@ -30,8 +34,10 @@ class PaymentHistory {
             amount: this.amount,
             ticket_pdf: this.ticket_pdf,
             stripe_invoice_url: this.stripe_invoice_url,
-            created_at: this.created_at
-        }
+            created_at: this.created_at,
+            stripe_customer_id: this.stripe_customer_id,
+            stripe_checkout_session_id: this.stripe_checkout_session_id,
+        };
     }
 
     // Método estático para crear desde objeto de Stripe Invoice
@@ -76,6 +82,10 @@ class PaymentHistory {
         // Stripe llama invoice_pdf al PDF del cobro; en DB es ticket_pdf.
         const ticketPdf = stripeInvoice.invoice_pdf || null;
         const stripeInvoiceUrl = stripeInvoice.hosted_invoice_url || null;
+        const customerId =
+            typeof stripeInvoice.customer === 'string'
+                ? stripeInvoice.customer
+                : stripeInvoice.customer?.id || null;
         
         return new PaymentHistory(
             uuid.v4(),
@@ -85,7 +95,52 @@ class PaymentHistory {
             amount,
             ticketPdf,
             new Date(stripeInvoice.created * 1000),
-            stripeInvoiceUrl
+            stripeInvoiceUrl,
+            customerId,
+            null
+        );
+    }
+
+    /**
+     * Anticipo / setup (Checkout mode=payment). Sin suscripción.
+     * stripe_invoice_id: invoice de Stripe si existe; si no, id estable de la session.
+     */
+    static fromStripeCheckoutSession(session, invoiceExtras = {}) {
+        const amount =
+            session.amount_total != null ? Number(session.amount_total) / 100 : 0;
+        const customerId =
+            typeof session.customer === 'string'
+                ? session.customer
+                : session.customer?.id || null;
+        const invoiceId =
+            typeof session.invoice === 'string'
+                ? session.invoice
+                : session.invoice?.id || null;
+        const stripeInvoiceId = invoiceId || `checkout:${session.id}`;
+        const ticketPdf =
+            invoiceExtras.invoice_pdf ||
+            session.invoice_pdf ||
+            null;
+        const hostedUrl =
+            invoiceExtras.hosted_invoice_url ||
+            session.hosted_invoice_url ||
+            null;
+        const created =
+            session.created != null
+                ? new Date(session.created * 1000)
+                : new Date();
+
+        return new PaymentHistory(
+            uuid.v4(),
+            null,
+            stripeInvoiceId,
+            session.payment_status || 'paid',
+            amount,
+            ticketPdf,
+            created,
+            hostedUrl,
+            customerId,
+            session.id
         );
     }
 }
