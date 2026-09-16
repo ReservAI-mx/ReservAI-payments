@@ -36,6 +36,9 @@ const UpsertMyFiscalInfo = require('../handlers/UpsertMyFiscalInfo');
 const PatchMyFiscalInfo = require('../handlers/PatchMyFiscalInfo');
 const DeleteMyFiscalInfo = require('../handlers/DeleteMyFiscalInfo');
 const GetFiscalByAccountId = require('../handlers/GetFiscalByAccountId');
+const CreateInvoiceFromPayment = require('../handlers/CreateInvoiceFromPayment');
+const { DownloadInvoicePdf, DownloadInvoiceXml } = require('../handlers/DownloadInvoiceFile');
+const DownloadTicketPdf = require('../handlers/DownloadTicketPdf');
 
 router.use(PathSecurityValidator.middleware());
 
@@ -78,6 +81,15 @@ router.put("/fiscal", ...withAccess, UpsertMyFiscalInfo);
 router.patch("/fiscal", ...withAccess, PatchMyFiscalInfo);
 router.delete("/fiscal", ...withAccess, DeleteMyFiscalInfo);
 router.get("/fiscal/:account_id", ...withAdmin, GetFiscalByAccountId);
+
+router.post(
+  "/invoices/from-payment/:payment_history_id",
+  ...withAccess,
+  CreateInvoiceFromPayment
+);
+router.get("/invoices/:id/pdf", ...withAccess, DownloadInvoicePdf);
+router.get("/invoices/:id/xml", ...withAccess, DownloadInvoiceXml);
+router.get("/tickets/:payment_history_id/pdf", ...withAccess, DownloadTicketPdf);
 
 router.use((req, res) => {
     return res.status(404).json({

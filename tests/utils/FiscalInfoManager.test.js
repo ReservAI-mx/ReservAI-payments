@@ -28,6 +28,18 @@ describe('FiscalInfoManager', () => {
     expect(r.uso_cfdi).toBe('G03');
   });
 
+  test('validateUpsertInput rejects regimen incompatible with persona', () => {
+    const r = FiscalInfoManager.validateUpsertInput({
+      confirmed: true,
+      rfc: 'XAXX010101000',
+      razon_social: 'ACME SA',
+      codigo_postal: '01000',
+      regimen_fiscal: '601',
+      persona_moral: false,
+    });
+    expect(r.error).toBe('regimen_fiscal no válido para persona física');
+  });
+
   test('resolvePriceVariant uses moral only when active+valid+moral', async () => {
     const db = {
       query: jest.fn(async () => ({

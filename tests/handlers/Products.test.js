@@ -24,12 +24,15 @@ describe('products handlers', () => {
     expect(getStripeInstance).not.toHaveBeenCalled();
   });
 
-  it('CreateProduct creates via Stripe then DB', async () => {
+  it('CreateProduct creates via Stripe, Facturama then DB', async () => {
     ProductsManager.validateCreateInput.mockReturnValue({
       name: 'Plan',
       description: 'D',
       monthly_amount: 100,
       setup_amount: 500,
+      facturama_code_prod_serv: '81112100',
+      facturama_unit_code: 'E48',
+      facturama_unit: 'Servicio',
     });
     getStripeInstance.mockResolvedValue({});
     ProductsManager.createInStripe.mockResolvedValue({
@@ -40,14 +43,51 @@ describe('products handlers', () => {
       stripe_price_id_setup: 'ps',
       stripe_price_id_setup_moral: 'psm',
     });
+    ProductsManager.createInFacturama.mockResolvedValue({
+      success: true,
+      facturama_product_id: 'fac_1',
+      facturama_code_prod_serv: '81112100',
+      facturama_unit_code: 'E48',
+      facturama_unit: 'Servicio',
+    });
     ProductsManager.insertInDB.mockResolvedValue({
       success: true,
-      product: { id: 'uuid-1', name: 'Plan' },
+      product: { id: 'uuid-1', name: 'Plan', facturama_product_id: 'fac_1' },
     });
     const res = createMockRes();
     await CreateProduct(createMockReq({ body: { name: 'Plan' } }), res);
     expect(res.status).toHaveBeenCalledWith(201);
     expect(res._json.data.id).toBe('uuid-1');
+    expect(ProductsManager.createInFacturama).toHaveBeenCalled();
+  });
+
+  it('CreateProduct fails if Facturama fails', async () => {
+    ProductsManager.validateCreateInput.mockReturnValue({
+      name: 'Plan',
+      description: 'D',
+      monthly_amount: 100,
+      setup_amount: 500,
+      facturama_code_prod_serv: '81112100',
+      facturama_unit_code: 'E48',
+      facturama_unit: 'Servicio',
+    });
+    getStripeInstance.mockResolvedValue({});
+    ProductsManager.createInStripe.mockResolvedValue({
+      success: true,
+      stripe_product_id: 'prod_1',
+      stripe_price_id_monthly: 'pm',
+      stripe_price_id_monthly_moral: 'pmm',
+      stripe_price_id_setup: 'ps',
+      stripe_price_id_setup_moral: 'psm',
+    });
+    ProductsManager.createInFacturama.mockResolvedValue({
+      success: false,
+      error: 'Facturama boom',
+    });
+    const res = createMockRes();
+    await CreateProduct(createMockReq({ body: { name: 'Plan' } }), res);
+    expect(res.status).toHaveBeenCalledWith(502);
+    expect(ProductsManager.insertInDB).not.toHaveBeenCalled();
   });
 
   it('ListProducts returns rows', async () => {

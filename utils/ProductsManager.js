@@ -3,6 +3,7 @@ const ListProducts = require('../queries/ListProducts');
 const SetProductActive = require('../queries/SetProductActive');
 const GetProductById = require('../queries/GetProductById');
 const GetProductByName = require('../queries/GetProductByName');
+const FacturamaClient = require('./FacturamaClient');
 
 const MORAL_FACTOR = 0.9875; // 1.25% menos
 const CURRENCY = 'mxn';
@@ -22,6 +23,14 @@ class ProductsManager {
     const description = body?.description != null ? String(body.description).trim() : '';
     const monthly_amount = Number(body?.monthly_amount);
     const setup_amount = Number(body?.setup_amount);
+    const codeFromBody =
+      body?.facturama_code_prod_serv != null
+        ? String(body.facturama_code_prod_serv).trim()
+        : '';
+    const facturama_code_prod_serv =
+      codeFromBody || process.env.FACTURAMA_PRODUCT_CODE || '81112100';
+    const facturama_unit_code = process.env.FACTURAMA_UNIT_CODE || 'E48';
+    const facturama_unit = 'Servicio';
 
     if (!name) return { error: 'name es requerido' };
     if (!description) return { error: 'description es requerido' };
@@ -31,8 +40,19 @@ class ProductsManager {
     if (!Number.isFinite(setup_amount) || setup_amount <= 0) {
       return { error: 'setup_amount debe ser mayor a 0' };
     }
+    if (!facturama_code_prod_serv) {
+      return { error: 'facturama_code_prod_serv / FACTURAMA_PRODUCT_CODE requerido' };
+    }
 
-    return { name, description, monthly_amount, setup_amount };
+    return {
+      name,
+      description,
+      monthly_amount,
+      setup_amount,
+      facturama_code_prod_serv,
+      facturama_unit_code,
+      facturama_unit,
+    };
   }
 
   static async createInStripe(name, description, monthly_amount, setup_amount, stripe) {
@@ -85,6 +105,44 @@ class ProductsManager {
     }
   }
 
+  static async createInFacturama(parsed, stripeProductId) {
+    const payload = {
+      Unit: parsed.facturama_unit,
+      UnitCode: parsed.facturama_unit_code,
+      IdentificationNumber: String(stripeProductId || parsed.name).slice(0, 50),
+      Name: String(parsed.name).slice(0, 50),
+      Description: parsed.description,
+      Price: parsed.monthly_amount,
+      CodeProdServ: parsed.facturama_code_prod_serv,
+      Taxes: [
+        {
+          Name: 'IVA',
+          Rate: 0.16,
+          IsRetention: false,
+          IsFederalTax: true,
+        },
+      ],
+    };
+
+    const created = await FacturamaClient.createProduct(payload);
+    if (!created.success) {
+      return { success: false, error: created.error || 'Error creando producto en Facturama' };
+    }
+
+    const facturama_product_id = created.data?.Id || created.data?.id || null;
+    if (!facturama_product_id) {
+      return { success: false, error: 'Facturama no devolvió Id de producto' };
+    }
+
+    return {
+      success: true,
+      facturama_product_id,
+      facturama_code_prod_serv: parsed.facturama_code_prod_serv,
+      facturama_unit_code: parsed.facturama_unit_code,
+      facturama_unit: parsed.facturama_unit,
+    };
+  }
+
   static async insertInDB(row, db) {
     try {
       const result = await db.query(InsertProduct, [
@@ -97,6 +155,10 @@ class ProductsManager {
         row.stripe_price_id_monthly_moral,
         row.stripe_price_id_setup,
         row.stripe_price_id_setup_moral,
+        row.facturama_product_id || null,
+        row.facturama_code_prod_serv || null,
+        row.facturama_unit_code || null,
+        row.facturama_unit || null,
       ]);
       return { success: true, product: result.rows[0] };
     } catch (error) {

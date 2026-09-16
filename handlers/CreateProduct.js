@@ -31,6 +31,20 @@ const CreateProduct = async (req, res) => {
     return res.status(500).json({ error: stripeResult.error || 'Error creando precios en Stripe' });
   }
 
+  const facturamaResult = await ProductsManager.createInFacturama(
+    parsed,
+    stripeResult.stripe_product_id
+  );
+  if (!facturamaResult.success) {
+    captureStripeFailure(facturamaResult.error || 'createInFacturama failed', {
+      phase: 'billing.products.createFacturama',
+      stripe_product_id: stripeResult.stripe_product_id,
+    });
+    return res.status(502).json({
+      error: facturamaResult.error || 'Error creando producto en Facturama',
+    });
+  }
+
   let db = null;
   try {
     db = await connectDB();
@@ -50,6 +64,10 @@ const CreateProduct = async (req, res) => {
       stripe_price_id_monthly_moral: stripeResult.stripe_price_id_monthly_moral,
       stripe_price_id_setup: stripeResult.stripe_price_id_setup,
       stripe_price_id_setup_moral: stripeResult.stripe_price_id_setup_moral,
+      facturama_product_id: facturamaResult.facturama_product_id,
+      facturama_code_prod_serv: facturamaResult.facturama_code_prod_serv,
+      facturama_unit_code: facturamaResult.facturama_unit_code,
+      facturama_unit: facturamaResult.facturama_unit,
     },
     db
   );
@@ -57,13 +75,14 @@ const CreateProduct = async (req, res) => {
     captureStripeFailure(insert.error || 'insertInDB failed', {
       phase: 'billing.products.insertDB',
       stripe_product_id: stripeResult.stripe_product_id,
+      facturama_product_id: facturamaResult.facturama_product_id,
     });
     return res.status(500).json({ error: insert.error || 'Error guardando producto' });
   }
 
   return res.status(201).json({
     data: insert.product,
-    message: 'producto creado',
+    message: 'producto creado en Stripe, Facturama y DB',
   });
 };
 

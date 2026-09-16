@@ -15,12 +15,19 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 const RFC_RE = /^[A-ZÑ&]{3,4}\d{6}[A-Z0-9]{3}$/i;
 const CP_RE = /^\d{5}$/;
 
+const REGIMENES_FISICA = new Set(['612', '626', '621', '606', '625', '605', '608']);
+const REGIMENES_MORAL = new Set(['601', '626', '603', '622', '620', '623', '624']);
+
 class FiscalInfoManager {
   static getDisclaimerMeta() {
     return {
       terms_version: TERMS_VERSION,
       disclaimer_text: DISCLAIMER_TEXT,
     };
+  }
+
+  static allowedRegimenes(personaMoral) {
+    return personaMoral ? REGIMENES_MORAL : REGIMENES_FISICA;
   }
 
   static toPublic(row) {
@@ -65,6 +72,13 @@ class FiscalInfoManager {
     if (!razon_social || razon_social.length < 3) return { error: 'razon_social es requerida' };
     if (!CP_RE.test(codigo_postal)) return { error: 'codigo_postal inválido' };
     if (!regimen_fiscal) return { error: 'regimen_fiscal es requerido' };
+    if (!FiscalInfoManager.allowedRegimenes(persona_moral).has(regimen_fiscal)) {
+      return {
+        error: persona_moral
+          ? 'regimen_fiscal no válido para persona moral'
+          : 'regimen_fiscal no válido para persona física',
+      };
+    }
 
     return {
       rfc,
