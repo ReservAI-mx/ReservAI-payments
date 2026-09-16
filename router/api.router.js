@@ -31,6 +31,11 @@ const RetryJob = require('../handlers/RetryJob');
 const ListProducts = require('../handlers/ListProducts');
 const CreateProduct = require('../handlers/CreateProduct');
 const UpdateProduct = require('../handlers/UpdateProduct');
+const GetMyFiscalInfo = require('../handlers/GetMyFiscalInfo');
+const UpsertMyFiscalInfo = require('../handlers/UpsertMyFiscalInfo');
+const PatchMyFiscalInfo = require('../handlers/PatchMyFiscalInfo');
+const DeleteMyFiscalInfo = require('../handlers/DeleteMyFiscalInfo');
+const GetFiscalByAccountId = require('../handlers/GetFiscalByAccountId');
 
 router.use(PathSecurityValidator.middleware());
 
@@ -67,6 +72,12 @@ router.post("/jobs/:id/retry", ...withAdmin, RetryJob);
 router.get("/products", ...withAdmin, ListProducts);
 router.post("/products", ...withAdmin, CreateProduct);
 router.patch("/products/:id", ...withAdmin, UpdateProduct);
+
+router.get("/fiscal", ...withAccess, GetMyFiscalInfo);
+router.put("/fiscal", ...withAccess, UpsertMyFiscalInfo);
+router.patch("/fiscal", ...withAccess, PatchMyFiscalInfo);
+router.delete("/fiscal", ...withAccess, DeleteMyFiscalInfo);
+router.get("/fiscal/:account_id", ...withAdmin, GetFiscalByAccountId);
 
 router.use((req, res) => {
     return res.status(404).json({

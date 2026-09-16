@@ -10,7 +10,7 @@ describe('SQL query modules', () => {
       const sql = require(path.join(queriesDir, file));
       expect(typeof sql).toBe('string');
       const upper = sql.toUpperCase();
-      expect(upper).toMatch(/SELECT|INSERT|UPDATE/);
+      expect(upper).toMatch(/SELECT|INSERT|UPDATE|DELETE/);
       expect(sql).toMatch(/\$1/);
     });
   });

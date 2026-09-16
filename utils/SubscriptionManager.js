@@ -278,7 +278,8 @@ class SubscriptionManager {
         success_url = null,
         cancel_url = null,
         stripe,
-        products = []
+        products = [],
+        priceCtx = null
     ) {
         try {
             if (!stripe_customer_id) {
@@ -309,29 +310,40 @@ class SubscriptionManager {
             const successUrl = success_url || process.env.PAYMENT_SUCCESS_URL || 'https://stripe.com';
             const cancelUrl = cancel_url || process.env.PAYMENT_CANCEL_URL || 'https://stripe.com';
 
+            const FiscalInfoManager = require('./FiscalInfoManager');
+            const priceVariant = priceCtx?.variant === 'moral' ? 'moral' : 'full';
+            const fiscalFlags = priceCtx?.flags || {};
+
             const sessions = await Promise.all(
-                products.map((product) =>
-                    stripe.checkout.sessions.create({
+                products.map((product) => {
+                    const priceId = FiscalInfoManager.pickSetupPriceId(product, priceVariant);
+                    return stripe.checkout.sessions.create({
                         customer: stripe_customer_id,
                         payment_method_types: ['card'],
                         mode: 'payment',
-                        line_items: [{ price: product.stripe_price_id_setup, quantity: 1 }],
+                        line_items: [{ price: priceId, quantity: 1 }],
                         allow_promotion_codes: true,
                         metadata: {
                             ...baseMetadata,
                             planned_plan: product.name,
                             product_id: product.id,
+                            price_variant: priceVariant,
+                            fiscal_active: String(!!fiscalFlags.fiscal_active),
+                            sat_validation_status: fiscalFlags.sat_validation_status || '',
+                            persona_moral: String(!!fiscalFlags.persona_moral),
                         },
                         success_url: successUrl,
                         cancel_url: cancelUrl,
                         client_reference_id: account_id || undefined
-                    })
-                )
+                    });
+                })
             );
 
             return {
                 success: true,
                 message: 'Checkout sessions created successfully',
+                price_variant: priceVariant,
+                fiscal: fiscalFlags,
                 paymentLinks: products.map((product, i) => ({
                     id: product.id,
                     name: product.name,
@@ -341,6 +353,7 @@ class SubscriptionManager {
                     url: sessions[i].url,
                     session_id: sessions[i].id,
                     plan: product.name,
+                    price_variant: priceVariant,
                 }))
             }
         } catch (error) {
@@ -372,6 +385,7 @@ class SubscriptionManager {
             }
 
             const ProductsManager = require('./ProductsManager');
+            const FiscalInfoManager = require('./FiscalInfoManager');
             const found = await ProductsManager.findForCheckout(planned_plan, db);
             if (!found.success) {
                 return {
@@ -381,7 +395,18 @@ class SubscriptionManager {
                 }
             }
             const product = found.product;
-            const priceId = product.stripe_price_id_monthly;
+
+            const priceResolved = await FiscalInfoManager.resolvePriceVariant(account_id, db);
+            if (!priceResolved.success) {
+                return {
+                    success: false,
+                    message: 'Error creating checkout session',
+                    error: priceResolved.error || 'Error resolviendo precio fiscal'
+                }
+            }
+            const priceVariant = priceResolved.variant;
+            const fiscalFlags = priceResolved.flags;
+            const priceId = FiscalInfoManager.pickMonthlyPriceId(product, priceVariant);
             if (!priceId) {
                 return {
                     success: false,
@@ -394,6 +419,13 @@ class SubscriptionManager {
             const cancelUrl = cancel_url || process.env.PAYMENT_CANCEL_URL || 'https://stripe.com';
             const planLabel = product.name;
 
+            const fiscalMeta = {
+                price_variant: priceVariant,
+                fiscal_active: String(!!fiscalFlags.fiscal_active),
+                sat_validation_status: fiscalFlags.sat_validation_status || '',
+                persona_moral: String(!!fiscalFlags.persona_moral),
+            };
+
             const session = await stripe.checkout.sessions.create({
                 customer: stripe_customer_id,
                 payment_method_types: ['card'],
@@ -405,6 +437,7 @@ class SubscriptionManager {
                     technical_info_id,
                     planned_plan: planLabel,
                     product_id: product.id,
+                    ...fiscalMeta,
                 },
                 subscription_data: {
                     metadata: {
@@ -413,6 +446,7 @@ class SubscriptionManager {
                         technical_info_id,
                         planned_plan: planLabel,
                         product_id: product.id,
+                        ...fiscalMeta,
                     }
                 },
                 success_url: successUrl,
@@ -425,7 +459,9 @@ class SubscriptionManager {
                 url: session.url,
                 session_id: session.id,
                 plan: planLabel,
-                technical_info_id
+                technical_info_id,
+                price_variant: priceVariant,
+                fiscal: fiscalFlags,
             }
         } catch (error) {
             return {

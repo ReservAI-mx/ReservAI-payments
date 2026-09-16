@@ -3,6 +3,7 @@ jest.mock('../../utils/CustomersManager');
 jest.mock('../../utils/SubscriptionManager');
 jest.mock('../../utils/TechnicalInfoManager');
 jest.mock('../../utils/ProductsManager');
+jest.mock('../../utils/FiscalInfoManager');
 jest.mock('../../data/connectDB', () => ({
   connectDB: jest.fn(async () => ({})),
 }));
@@ -12,6 +13,7 @@ const CustomersManager = require('../../utils/CustomersManager');
 const SubscriptionManager = require('../../utils/SubscriptionManager');
 const TechnicalInfoManager = require('../../utils/TechnicalInfoManager');
 const ProductsManager = require('../../utils/ProductsManager');
+const FiscalInfoManager = require('../../utils/FiscalInfoManager');
 const GetMyPaymentLinks = require('../../handlers/GetMyPaymentLinks');
 const { createMockReq, createMockRes } = require('../helpers/mockReqRes');
 
@@ -39,6 +41,16 @@ describe('GetMyPaymentLinks', () => {
       success: true,
       products: [{ id: 'p1', name: 'Básico', stripe_price_id_setup: 'price_s' }],
     });
+    FiscalInfoManager.resolvePriceVariant.mockResolvedValue({
+      success: true,
+      variant: 'full',
+      flags: {
+        fiscal_registered: false,
+        fiscal_active: false,
+        sat_validation_status: null,
+        persona_moral: false,
+      },
+    });
     CustomersManager.createPortalSession.mockResolvedValue({
       success: false,
       error: 'portal error',
@@ -47,6 +59,8 @@ describe('GetMyPaymentLinks', () => {
       success: true,
       message: 'ok',
       paymentLinks: [{ id: 'p1', name: 'Básico', url: 'https://b' }],
+      price_variant: 'full',
+      fiscal: { persona_moral: false },
     });
     const req = createMockReq();
     req.query = { subdomain: 'negocio' };
@@ -63,7 +77,8 @@ describe('GetMyPaymentLinks', () => {
       null,
       null,
       expect.anything(),
-      expect.any(Array)
+      expect.any(Array),
+      expect.objectContaining({ variant: 'full' })
     );
   });
 

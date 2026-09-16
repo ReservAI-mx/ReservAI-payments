@@ -2,6 +2,7 @@ const SubscriptionManager = require('../utils/SubscriptionManager');
 const CustomersManager = require('../utils/CustomersManager');
 const TechnicalInfoManager = require('../utils/TechnicalInfoManager');
 const ProductsManager = require('../utils/ProductsManager');
+const FiscalInfoManager = require('../utils/FiscalInfoManager');
 const getStripeInstance = require('../data/StripeInstanceGetter');
 const { connectDB } = require('../data/connectDB');
 const { validateSubdomain } = require('../utils/SubdomainValidator');
@@ -46,6 +47,14 @@ const GetMyPaymentLinks = async (req, res) => {
         return res.status(503).json({ error: 'NO_ACTIVE_PRODUCTS' });
     }
 
+    const priceCtx = await FiscalInfoManager.resolvePriceVariant(account.id, db);
+    if (!priceCtx.success) {
+        captureStripeFailure(priceCtx.error || 'resolvePriceVariant failed', {
+            phase: 'billing.links.resolvePriceVariant',
+        });
+        return res.status(500).json({ error: priceCtx.error || 'Error resolviendo precio fiscal' });
+    }
+
     let stripe = null;
     try {
         stripe = await getStripeInstance();
@@ -71,7 +80,8 @@ const GetMyPaymentLinks = async (req, res) => {
         portalUrl,
         portalUrl,
         stripe,
-        listed.products
+        listed.products,
+        priceCtx
     );
 
     if (!result.success) {
@@ -87,7 +97,9 @@ const GetMyPaymentLinks = async (req, res) => {
 
     return res.status(200).json({
         message: result.message,
-        paymentLinks: result.paymentLinks
+        paymentLinks: result.paymentLinks,
+        price_variant: result.price_variant,
+        fiscal: result.fiscal,
     });
 }
 
