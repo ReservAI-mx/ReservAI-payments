@@ -44,8 +44,15 @@ function makeDownloadHandler(kind) {
       const status = result.status || 500;
       if (status >= 500) {
         captureStripeFailure(result.error, { phase: `billing.invoices.download.${kind}` });
+        return res.status(500).json({ error: 'Internal server error' });
       }
-      return res.status(status).json({ error: result.error });
+      const safe =
+        status === 404
+          ? result.error === 'INVOICE_NOT_FOUND' || result.error === 'FILE_NOT_STORED'
+            ? result.error
+            : 'INVOICE_NOT_FOUND'
+          : 'Internal server error';
+      return res.status(status === 404 ? 404 : 500).json({ error: safe });
     }
 
     res.setHeader('Content-Type', result.contentType);

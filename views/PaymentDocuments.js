@@ -2,10 +2,11 @@ class PaymentDocumentsMessage {
   static shortError(raw) {
     if (!raw) return 'error de timbrado';
     const text = String(raw);
-    if (text.includes('ExpeditionPlace')) {
-      return 'lugar de expedición del emisor no configurado en Facturama';
+    // Nunca filtrar detalle operativo (sello, CSD, ExpeditionPlace, JSON Facturama).
+    if (text.includes('FISCAL_NOT_READY') || text.includes('SAT_NOT_VALID')) {
+      return 'perfil fiscal no listo';
     }
-    if (text.includes('FISCAL_NOT_READY')) return 'perfil fiscal no activo';
+    if (text.includes('MONTH_EXPIRED')) return 'fuera de plazo de facturación';
     return 'error de timbrado';
   }
 
