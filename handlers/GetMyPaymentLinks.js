@@ -6,6 +6,7 @@ const FiscalInfoManager = require('../utils/FiscalInfoManager');
 const getStripeInstance = require('../data/StripeInstanceGetter');
 const { connectDB } = require('../data/connectDB');
 const { validateSubdomain } = require('../utils/SubdomainValidator');
+const { normalizePipelineTestPhone } = require('../utils/PhoneValidator');
 const { captureStripeFailure } = require('../utils/captureOpsError');
 
 const GetMyPaymentLinks = async (req, res) => {
@@ -14,6 +15,10 @@ const GetMyPaymentLinks = async (req, res) => {
     const parsed = validateSubdomain(req.query.subdomain);
     if (parsed.error) {
         return res.status(400).json({ error: parsed.error });
+    }
+    const phone = normalizePipelineTestPhone(req.query.pipeline_test_phone);
+    if (!phone.ok) {
+        return res.status(400).json({ error: 'PIPELINE_TEST_PHONE_INVALID' });
     }
 
     let db = null;
@@ -77,6 +82,7 @@ const GetMyPaymentLinks = async (req, res) => {
         customer.stripe_customer_id,
         account.id,
         parsed.subdomain,
+        phone.canonical,
         portalUrl,
         portalUrl,
         stripe,

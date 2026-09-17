@@ -1,5 +1,6 @@
 const TechnicalInfoManager = require('../utils/TechnicalInfoManager');
 const ProvisionFanout = require('../utils/ProvisionFanout');
+const SetupProvisionManager = require('../utils/SetupProvisionManager');
 const { connectDB } = require('../data/connectDB');
 
 const RetryProvision = async (req, res) => {
@@ -23,6 +24,15 @@ const RetryProvision = async (req, res) => {
   }
   if (!claimed.id) {
     return res.status(409).json({ error: 'Retry ya reclamado o sin error' });
+  }
+
+  const fresh = await TechnicalInfoManager.getById(claimed.id, db);
+  const tenant = fresh.tenant || req.technical_info;
+  if (!tenant.encrypted_setup_json) {
+    const ensured = await SetupProvisionManager.ensureEncryptedSetup(tenant, db);
+    if (!ensured.success || !ensured.tenant?.encrypted_setup_json) {
+      return res.status(502).json({ error: ensured.error || 'No se pudo armar el setup' });
+    }
   }
 
   const fanout = await ProvisionFanout.notify(claimed.id, 'provision', db);

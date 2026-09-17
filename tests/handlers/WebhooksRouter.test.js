@@ -12,6 +12,9 @@ jest.mock('../../utils/ProvisionFanout');
 jest.mock('../../utils/InvoiceManager');
 jest.mock('../../utils/VaultCrypto');
 jest.mock('../../data/StripeInstanceGetter');
+jest.mock('../../utils/CreatePasswordsClient', () => ({
+  createPasswords: jest.fn(async () => ({ ok: true, created: 4, skipped: 0 })),
+}));
 jest.mock('../../utils/captureOpsError', () => ({
   captureOpsError: jest.fn((e) => (e instanceof Error ? e : new Error(String(e)))),
   captureStripeFailure: jest.fn((e) => (e instanceof Error ? e : new Error(String(e)))),
@@ -32,6 +35,7 @@ const ProvisionFanout = require('../../utils/ProvisionFanout');
 const InvoiceManager = require('../../utils/InvoiceManager');
 const VaultCrypto = require('../../utils/VaultCrypto');
 const getStripeInstance = require('../../data/StripeInstanceGetter');
+const CreatePasswordsClient = require('../../utils/CreatePasswordsClient');
 const { captureStripeFailure, flushSentry } = require('../../utils/captureOpsError');
 const WebhooksRouter = require('../../handlers/WebhooksRouter');
 const { loadStripeFixture } = require('../helpers/stripeFixtures');
@@ -79,15 +83,30 @@ describe('WebhooksRouter', () => {
     EmailManager.sendEmailToInternalTeam.mockResolvedValue({ success: true });
     PaymentFailedAlertManager.notifyTeam.mockResolvedValue({ success: true });
     SetupPaidAlertManager.notifyTeam.mockResolvedValue({ success: true });
-    TechnicalInfoManager.insertFromSetupSession.mockResolvedValue({ success: true, tenant: { id: 'ti-1' } });
+    TechnicalInfoManager.insertFromSetupSession.mockImplementation(async (row) => ({
+      success: true,
+      tenant: {
+        id: row.id || 'ti-1',
+        status: 'pending_provision',
+        provision_error: row.provision_error || null,
+        encrypted_setup_json: row.encrypted_setup_json || null,
+        pipeline_test_phone: row.pipeline_test_phone || null,
+        subdomain: row.subdomain,
+        account_id: row.account_id,
+        inbound_auth_key: row.inbound_auth_key,
+      },
+    }));
     TechnicalInfoManager.linkSubscription.mockResolvedValue({ success: true });
     TechnicalInfoManager.setStatus.mockResolvedValue({ success: true });
     TechnicalInfoManager.setStatusBySubscriptionId.mockResolvedValue({ success: true });
+    TechnicalInfoManager.setProvisionError.mockResolvedValue({ success: true });
+    TechnicalInfoManager.updateEncryptedSetup.mockResolvedValue({ success: true, tenant: null });
     TechnicalInfoManager.getForFanout.mockResolvedValue({ success: true, tenant: { id: 'ti-1', subdomain: 'acme' } });
     TechnicalInfoManager.getBySetupSessionId.mockResolvedValue({ success: true, tenant: null });
     PaymentFanout.notifyBySubscriptionId.mockResolvedValue();
     ProvisionFanout.notify.mockResolvedValue({ success: true });
     VaultCrypto.encrypt.mockReturnValue('{"keyId":"v1"}');
+    VaultCrypto.decrypt.mockReturnValue('inbound-plain');
 
     InvoiceManager.getAccountAndPlanBySubscriptionId.mockResolvedValue({
       success: true,
@@ -102,6 +121,7 @@ describe('WebhooksRouter', () => {
     getStripeInstance.mockResolvedValue({
       invoices: { retrieve: jest.fn().mockResolvedValue({}) },
     });
+    CreatePasswordsClient.createPasswords.mockResolvedValue({ ok: true, created: 4, skipped: 0 });
   });
 
   async function runWebhook(fixtureName) {
@@ -248,13 +268,13 @@ describe('WebhooksRouter', () => {
   });
 
   it('checkout.session.completed setup inserts technical_info and emails customer + team', async () => {
-    TechnicalInfoManager.insertFromSetupSession.mockResolvedValueOnce({
-      success: true,
-      tenant: { id: 'ti-1', status: 'pending_provision', provision_error: null },
-    });
     await runWebhook('checkout.session.completed');
     expect(TechnicalInfoManager.insertFromSetupSession).toHaveBeenCalled();
-    expect(ProvisionFanout.notify).toHaveBeenCalledWith('ti-1', 'provision', db);
+    expect(ProvisionFanout.notify).toHaveBeenCalledWith(
+      expect.any(String),
+      'provision',
+      db
+    );
     expect(SetupPaidAlertManager.notifyTeam).toHaveBeenCalled();
     expect(EmailManager.sendEmailToCustomer).toHaveBeenCalled();
     expect(PaymentHistoryManager.createPaymentHistoryInDB).toHaveBeenCalled();
@@ -304,10 +324,14 @@ describe('WebhooksRouter', () => {
   });
 
   it('checkout.session.completed setup replay (ON CONFLICT) does not alert again', async () => {
-    TechnicalInfoManager.insertFromSetupSession.mockResolvedValueOnce({ success: true, tenant: null });
     TechnicalInfoManager.getBySetupSessionId.mockResolvedValueOnce({
       success: true,
-      tenant: { id: 'ti-1', status: 'pending_provision', provision_error: 'dns_apex: x' },
+      tenant: {
+        id: 'ti-1',
+        status: 'pending_provision',
+        provision_error: 'dns_apex: x',
+        encrypted_setup_json: '{"keyId":"v1"}',
+      },
     });
     PaymentHistoryManager.createPaymentHistoryInDB.mockResolvedValueOnce({
       success: false,
@@ -319,6 +343,7 @@ describe('WebhooksRouter', () => {
     expect(ProvisionFanout.notify).not.toHaveBeenCalled();
     expect(PaymentHistoryManager.createPaymentHistoryInDB).toHaveBeenCalled();
     expect(InvoiceManager.notifyPaymentDocuments).not.toHaveBeenCalled();
+    expect(CreatePasswordsClient.createPasswords).not.toHaveBeenCalled();
   });
 
   it('customer.subscription.updated with cancellation disables renewal', async () => {
@@ -357,6 +382,103 @@ describe('WebhooksRouter', () => {
     await runWebhook('invoice.payment_succeeded.nosub');
     expect(PaymentHistoryManager.createPaymentHistoryInDB).not.toHaveBeenCalled();
     expect(SubscriptionManager.updateSubscriptionOnPaymentSuccess).not.toHaveBeenCalled();
+    expect(ProvisionFanout.notify).not.toHaveBeenCalled();
+  });
+
+  function cloneSetupEvent(phone) {
+    const event = loadStripeFixture('checkout.session.completed');
+    event.data.object.metadata = { ...event.data.object.metadata };
+    if (phone === undefined) delete event.data.object.metadata.pipeline_test_phone;
+    else event.data.object.metadata.pipeline_test_phone = phone;
+    return event;
+  }
+
+  async function runSetupEvent(event) {
+    const req = createMockReq({ event });
+    const res = createMockRes();
+    await WebhooksRouter(req, res);
+    expect(res.status).toHaveBeenCalledWith(200);
+    await flushAsync();
+    await flushAsync();
+    return { req, res };
+  }
+
+  function grpcItems() {
+    expect(CreatePasswordsClient.createPasswords).toHaveBeenCalled();
+    const args = CreatePasswordsClient.createPasswords.mock.calls[0];
+    const req = args[0];
+    if (Array.isArray(req)) return req;
+    if (req && (req.items || req.entries)) return req.items || req.entries;
+    if (Array.isArray(args[1])) return args[1];
+    return [];
+  }
+
+  it('checkout setup con teléfono canónico inserta blob y luego fanout', async () => {
+    const order = [];
+    TechnicalInfoManager.insertFromSetupSession.mockImplementation(async (row) => {
+      order.push('insert');
+      expect(row.encrypted_setup_json).toBeTruthy();
+      expect(row.pipeline_test_phone).toBe('+5213321540248');
+      return {
+        success: true,
+        tenant: {
+          id: row.id,
+          status: 'pending_provision',
+          provision_error: null,
+          encrypted_setup_json: row.encrypted_setup_json,
+        },
+      };
+    });
+    ProvisionFanout.notify.mockImplementation(async () => {
+      order.push('notify');
+      return { success: true };
+    });
+    await runSetupEvent(cloneSetupEvent('+5213321540248'));
+    expect(order).toEqual(['insert', 'notify']);
+    expect(TechnicalInfoManager.insertFromSetupSession.mock.invocationCallOrder[0])
+      .toBeLessThan(ProvisionFanout.notify.mock.invocationCallOrder[0]);
+  });
+
+  it('checkout setup con teléfono crudo re-normaliza a canónico antes de persistir', async () => {
+    TechnicalInfoManager.insertFromSetupSession.mockImplementation(async (row) => {
+      expect(row.pipeline_test_phone).toBe('+5213321540248');
+      return {
+        success: true,
+        tenant: {
+          id: row.id,
+          status: 'pending_provision',
+          provision_error: null,
+          encrypted_setup_json: row.encrypted_setup_json,
+        },
+      };
+    });
+    await runSetupEvent(cloneSetupEvent('3321540248'));
+    expect(ProvisionFanout.notify).toHaveBeenCalledWith(expect.any(String), 'provision', db);
+  });
+
+  it('checkout setup sin teléfono válido no llama ProvisionFanout.notify', async () => {
+    await runSetupEvent(cloneSetupEvent(undefined));
+    expect(ProvisionFanout.notify).not.toHaveBeenCalled();
+    await runSetupEvent(cloneSetupEvent('+15551234567'));
+    expect(ProvisionFanout.notify).not.toHaveBeenCalled();
+  });
+
+  it('gRPC: solo chatwoot_client_password visible; las 4 updateablebyclient=false; nombres sin prefijo', async () => {
+    await runSetupEvent(cloneSetupEvent('+5213321540248'));
+    const entries = grpcItems();
+    expect(entries).toHaveLength(4);
+    const visible = entries.filter((e) => e.visibility === true);
+    expect(visible).toHaveLength(1);
+    expect(visible[0].name).toBe('chatwoot_client_password');
+    for (const entry of entries) {
+      expect(entry.updateablebyclient).toBe(false);
+      expect(entry.name).not.toContain(':');
+    }
+  });
+
+  it('gRPC lento/fail → no fanout', async () => {
+    CreatePasswordsClient.createPasswords.mockRejectedValueOnce(new Error('UNAVAILABLE'));
+    await runSetupEvent(cloneSetupEvent('+5213321540248'));
     expect(ProvisionFanout.notify).not.toHaveBeenCalled();
   });
 

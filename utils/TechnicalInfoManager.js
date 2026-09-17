@@ -12,6 +12,8 @@ const SetTenantStatusBySubscriptionId = require('../queries/SetTenantStatusBySub
 const GetTenantForFanout = require('../queries/GetTenantForFanout');
 const GetTechnicalInfoBySetupSessionId = require('../queries/GetTechnicalInfoBySetupSessionId');
 const ClaimProvisionRetry = require('../queries/ClaimProvisionRetry');
+const UpdateEncryptedSetupJson = require('../queries/UpdateEncryptedSetupJson');
+const SetProvisionError = require('../queries/SetProvisionError');
 
 function fail(error) {
     return { success: false, error: error.message };
@@ -55,6 +57,9 @@ class TechnicalInfoManager {
                 row.planned_plan,
                 row.inbound_auth_key,
                 row.setup_session_id,
+                row.encrypted_setup_json || null,
+                row.pipeline_test_phone || null,
+                row.provision_error || null,
             ]);
             return { success: true, tenant: result.rows[0] || null };
         } catch (error) {
@@ -171,6 +176,28 @@ class TechnicalInfoManager {
         try {
             const result = await db.query(ClaimProvisionRetry, [id]);
             return { success: true, id: result.rows[0]?.id || null };
+        } catch (error) {
+            return fail(error);
+        }
+    }
+
+    static async updateEncryptedSetup(id, encrypted_setup_json, pipeline_test_phone, db) {
+        try {
+            const result = await db.query(UpdateEncryptedSetupJson, [
+                id,
+                encrypted_setup_json,
+                pipeline_test_phone || null,
+            ]);
+            return { success: true, tenant: result.rows[0] || null };
+        } catch (error) {
+            return fail(error);
+        }
+    }
+
+    static async setProvisionError(id, provision_error, db) {
+        try {
+            const result = await db.query(SetProvisionError, [id, provision_error]);
+            return { success: true, tenant: result.rows[0] || null };
         } catch (error) {
             return fail(error);
         }

@@ -275,6 +275,7 @@ class SubscriptionManager {
         stripe_customer_id,
         account_id,
         subdomain,
+        pipeline_test_phone,
         success_url = null,
         cancel_url = null,
         stripe,
@@ -301,7 +302,8 @@ class SubscriptionManager {
             const baseMetadata = {
                 kind: 'setup',
                 customer_id: stripe_customer_id,
-                subdomain
+                subdomain,
+                pipeline_test_phone,
             };
             if (account_id) {
                 baseMetadata.account_id = account_id;

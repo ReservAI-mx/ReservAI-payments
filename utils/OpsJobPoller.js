@@ -49,6 +49,14 @@ async function dispatchJob(job, db) {
     return;
   }
 
+  if (job.action === 'provision') {
+    const tenant = await resolveTenant(job, db);
+    if (!tenant?.encrypted_setup_json) {
+      await OpsJobManager.markFailed(job.id, 'encrypted_setup_json missing', job.attempts, db);
+      return;
+    }
+  }
+
   const posted = await ProvisionFanout.postJob({
     action: job.action,
     technical_info_id: job.technical_info_id,

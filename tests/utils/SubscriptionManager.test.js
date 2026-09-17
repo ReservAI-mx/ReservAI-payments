@@ -86,6 +86,7 @@ describe('SubscriptionManager', () => {
       'cus_1',
       'acc_1',
       'mi-sucursal',
+      '+5213321540248',
       'https://ok',
       'https://cancel',
       stripe,
@@ -102,6 +103,22 @@ describe('SubscriptionManager', () => {
         invoice_creation: { enabled: true },
         mode: 'payment',
         line_items: [{ price: 'price_setup_1', quantity: 1 }],
+        metadata: expect.objectContaining({
+          pipeline_test_phone: '+5213321540248',
+          planned_plan: 'Básico',
+        }),
+      })
+    );
+    expect(stripe.checkout.sessions.create).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        allow_promotion_codes: true,
+        invoice_creation: { enabled: true },
+        mode: 'payment',
+        metadata: expect.objectContaining({
+          pipeline_test_phone: '+5213321540248',
+          planned_plan: 'Premium',
+        }),
       })
     );
   });
@@ -112,6 +129,7 @@ describe('SubscriptionManager', () => {
       'cus_1',
       'acc_1',
       'mi-sucursal',
+      '+5213321540248',
       null,
       null,
       stripe,

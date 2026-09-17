@@ -34,5 +34,19 @@ process.env.DB_PORT = process.env.DB_PORT || '5432';
 process.env.DB_NAME = process.env.DB_NAME || 'testdb';
 process.env.DB_USER = process.env.DB_USER || 'test';
 process.env.DB_PASSWORD = process.env.DB_PASSWORD || 'test';
+process.env.BACKEND_GRPC_URL = process.env.BACKEND_GRPC_URL || 'passmanager-backend-service.flycast:50051';
+process.env.GRPC_HMAC_SECRET = process.env.GRPC_HMAC_SECRET || 'test-grpc-hmac-secret';
+process.env.BASE_DOMAIN = process.env.BASE_DOMAIN || 'reservai.com.mx';
+process.env.OPENAI_API_KEY = process.env.OPENAI_API_KEY || 'sk-test-openai';
+process.env.RESERVAI_SETUP_CONSTANTS = process.env.RESERVAI_SETUP_CONSTANTS || JSON.stringify({
+  ssl_email: 'ops@reservai.com.mx',
+  chatwoot_super_admin_email: 'admin@reservai.com.mx',
+  chatwoot_crm_admin_email: 'crm@reservai.com.mx',
+  admin_email: 'admin@reservai.com.mx',
+  google_client_id: 'gid-test',
+  google_client_secret: 'gsecret-test',
+  oauth_client_secret: 'oauth-test',
+  minio_root_user: 'root',
+});
 
 global.IS_PRODUCTION = false;

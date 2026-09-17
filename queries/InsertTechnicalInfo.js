@@ -7,11 +7,14 @@ module.exports = `
         planned_plan,
         inbound_auth_key,
         setup_session_id,
-        environment
+        environment,
+        encrypted_setup_json,
+        pipeline_test_phone,
+        provision_error
     )
-    VALUES ($1, $2, $3, 'pending_provision', $4, $5, $6, 'production')
+    VALUES ($1, $2, $3, 'pending_provision', $4, $5, $6, 'production', $7, $8, $9)
     ON CONFLICT (setup_session_id) DO NOTHING
     RETURNING id, account_id, subdomain, status, planned_plan, created_at, setup_session_id,
               provision_error, hostinger_vm_id, hostinger_vm_ip, dns_apex_record_id, dns_wildcard_record_id,
-              environment
+              environment, inbound_auth_key, encrypted_setup_json, pipeline_test_phone
 `;

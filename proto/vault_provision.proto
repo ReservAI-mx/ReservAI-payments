@@ -1,0 +1,28 @@
+syntax = "proto3";
+package passmanager.v1;
+
+service VaultProvision {
+  rpc CreatePasswords (CreatePasswordsRequest) returns (CreatePasswordsResponse);
+}
+
+message PasswordItem {
+  string name = 1;
+  string password = 2;
+  bool visibility = 3;
+  bool updateablebyclient = 4;
+}
+
+message CreatePasswordsRequest {
+  string account_id = 1;
+  repeated PasswordItem items = 2;
+}
+
+message PasswordResult {
+  string name = 1;
+  string status = 2;
+  string id = 3;
+}
+
+message CreatePasswordsResponse {
+  repeated PasswordResult results = 1;
+}

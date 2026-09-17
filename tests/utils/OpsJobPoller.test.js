@@ -56,10 +56,38 @@ describe('OpsJobPoller', () => {
       })
       .mockResolvedValueOnce(null);
     ProvisionFanout.postJob.mockResolvedValue({ success: false, error: '502' });
+    db.query = jest.fn().mockResolvedValue({
+      rows: [{ id: 'ti-1', encrypted_setup_json: '{"keyId":"v1"}' }],
+    });
 
     await tick();
 
     expect(OpsJobManager.markFailed).toHaveBeenCalledWith('job-2', '502', 2, db);
+  });
+
+  it('provision without encrypted_setup_json does not POST', async () => {
+    OpsJobManager.claimNext
+      .mockResolvedValueOnce({
+        id: 'job-4',
+        action: 'provision',
+        technical_info_id: 'ti-1',
+        attempts: 1,
+        payload: {},
+      })
+      .mockResolvedValueOnce(null);
+    db.query = jest.fn().mockResolvedValue({
+      rows: [{ id: 'ti-1', encrypted_setup_json: null }],
+    });
+
+    await tick();
+
+    expect(ProvisionFanout.postJob).not.toHaveBeenCalled();
+    expect(OpsJobManager.markFailed).toHaveBeenCalledWith(
+      'job-4',
+      'encrypted_setup_json missing',
+      1,
+      db
+    );
   });
 
   it('payment_notify success marks succeeded', async () => {

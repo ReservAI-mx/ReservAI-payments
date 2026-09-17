@@ -18,3 +18,5 @@ primary_region = "dfw"
 [env]
   PORT = "3001"
   STAGE = "production"
+  # Cliente gRPC hacia Backend (flycast). Stripe no abre puerto gRPC.
+  # BACKEND_GRPC_URL y GRPC_HMAC_SECRET van en secrets (no aquí).

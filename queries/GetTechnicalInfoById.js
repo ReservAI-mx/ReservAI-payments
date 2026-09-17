@@ -7,6 +7,8 @@ module.exports = `
         t.planned_plan,
         t.created_at,
         t.inbound_auth_key,
+        t.encrypted_setup_json,
+        t.pipeline_test_phone,
         t.provision_error,
         t.hostinger_vm_id,
         t.hostinger_vm_ip,

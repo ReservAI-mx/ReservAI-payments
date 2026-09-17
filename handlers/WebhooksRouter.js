@@ -13,10 +13,8 @@ const TechnicalInfoManager = require('../utils/TechnicalInfoManager');
 const PaymentFanout = require('../utils/PaymentFanout');
 const ProvisionFanout = require('../utils/ProvisionFanout');
 const InvoiceManager = require('../utils/InvoiceManager');
-const VaultCrypto = require('../utils/VaultCrypto');
 const getStripeInstance = require('../data/StripeInstanceGetter');
-const crypto = require('crypto');
-const uuid = require('uuid');
+const SetupProvisionManager = require('../utils/SetupProvisionManager');
 const { captureOpsError, captureStripeFailure, flushSentry } = require('../utils/captureOpsError');
 
 function webhookCtx(event, phase, extra = {}) {
@@ -380,74 +378,12 @@ const WebhooksRouter = async (req, res) => {
                         console.log('[stripe][webhook] skip provision: kind !== setup');
                         break;
                     }
-                    const inboundPlain = crypto.randomBytes(32).toString('hex');
-                    const inboundBlob = VaultCrypto.encrypt(inboundPlain);
-                    const inserted = await TechnicalInfoManager.insertFromSetupSession({
-                        id: uuid.v4(),
-                        account_id: metadata.account_id,
-                        subdomain: metadata.subdomain,
-                        planned_plan: metadata.planned_plan,
-                        inbound_auth_key: inboundBlob,
-                        setup_session_id: session.id,
-                    }, db);
-                    if (!inserted.success) {
-                        console.error('[stripe][webhook] insert technical_info failed:', inserted.error);
-                        captureStripeFailure(
-                            inserted.error || 'insert technical_info failed',
-                            webhookCtx(event, 'webhook.checkout.insert', {
-                                setup_session_id: session.id,
-                                subdomain: metadata.subdomain,
-                            })
-                        );
-                    }
-                    setupPaidInserted = Boolean(inserted.success && inserted.tenant);
-                    let tenant = inserted.tenant || null;
-                    if (!tenant) {
-                        const lookup = await TechnicalInfoManager.getBySetupSessionId(session.id, db);
-                        if (!lookup.success) {
-                            console.error('[stripe][webhook] lookup by setup_session failed:', lookup.error);
-                            captureStripeFailure(
-                                lookup.error || 'lookup by setup_session failed',
-                                webhookCtx(event, 'webhook.checkout.lookup', {
-                                    setup_session_id: session.id,
-                                    subdomain: metadata.subdomain,
-                                })
-                            );
-                        }
-                        tenant = lookup.tenant || null;
-                    }
+                    const setup = await SetupProvisionManager.handleSetupPaid(session, db);
+                    setupPaidInserted = Boolean(setup.inserted);
+                    if (setup.eventData) eventData = setup.eventData;
                     console.log(
-                      `[stripe][webhook] tenant=${tenant ? tenant.id : 'null'} status=${tenant?.status || '-'} provision_error=${tenant?.provision_error || '-'}`
+                      `[stripe][webhook] tenant=${setup.tenant ? setup.tenant.id : 'null'} status=${setup.tenant?.status || '-'} provision_error=${setup.tenant?.provision_error || '-'}`
                     );
-                    if (
-                        tenant
-                        && tenant.status === 'pending_provision'
-                        && !tenant.provision_error
-                    ) {
-                        const fanout = await ProvisionFanout.notify(tenant.id, 'provision', db);
-                        console.log('[stripe][webhook] ProvisionFanout result', fanout);
-                        if (!fanout.success && !fanout.skipped) {
-                            captureStripeFailure(
-                                fanout.error || 'ProvisionFanout failed',
-                                webhookCtx(event, 'webhook.checkout.provision', {
-                                    technical_info_id: tenant.id,
-                                    setup_session_id: session.id,
-                                    subdomain: metadata.subdomain,
-                                })
-                            );
-                        }
-                    } else {
-                        console.log('[stripe][webhook] skip ProvisionFanout (tenant/status/error)');
-                        if (!tenant && inserted.success !== false) {
-                            captureStripeFailure(
-                                'checkout setup completed but tenant missing after insert/lookup',
-                                webhookCtx(event, 'webhook.checkout.no_tenant', {
-                                    setup_session_id: session.id,
-                                    subdomain: metadata.subdomain,
-                                })
-                            );
-                        }
-                    }
                     // Cobro setup: payment_history + CFDI (mismo criterio que suscripción)
                     try {
                         let invoiceExtras = {};
@@ -536,15 +472,6 @@ const WebhooksRouter = async (req, res) => {
                             setupBillErr,
                             webhookCtx(event, 'webhook.checkout.billing')
                         );
-                    }
-
-                    if (setupPaidInserted) {
-                        eventData = {
-                            amount_total: session.amount_total,
-                            currency: session.currency,
-                            subdomain: metadata.subdomain,
-                            planned_plan: metadata.planned_plan,
-                        };
                     }
                 } catch (error) {
                     console.error('[stripe][webhook] checkout.session.completed error:', error.message);
