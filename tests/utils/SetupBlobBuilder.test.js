@@ -1,13 +1,21 @@
 'use strict';
 
+jest.mock('../../utils/CreatePasswordsClient', () => ({
+  encrypt: jest.fn(async (plain) => `enc:${plain}`),
+  decrypt: jest.fn(async (blob) => {
+    if (String(blob).startsWith('enc:')) return String(blob).slice(4);
+    throw new Error('bad blob');
+  }),
+}));
+
 const { buildEncryptedSetup } = require('../../utils/SetupBlobBuilder');
-const VaultCrypto = require('../../utils/VaultCrypto');
+const { decrypt } = require('../../utils/CreatePasswordsClient');
 
 const CANON = '+5213321540248';
 
 describe('SetupBlobBuilder', () => {
-  it('pipeline_test_phone en plaintext es canónico +521… y trae REQUIRED_FIELDS de org', () => {
-    const { payload, blob } = buildEncryptedSetup({
+  it('pipeline_test_phone en plaintext es canónico +521… y trae REQUIRED_FIELDS de org', async () => {
+    const { payload, blob } = await buildEncryptedSetup({
       subdomain: 'acme',
       client_email: 'cliente@acme.com',
       chatwoot_client_name: 'Acme',
@@ -25,7 +33,7 @@ describe('SetupBlobBuilder', () => {
     expect(payload.openai_api_key).toBeTruthy();
     expect(payload.google_client_id).toBeTruthy();
     expect(payload.oauth_client_secret).toBeTruthy();
-    const plain = JSON.parse(VaultCrypto.decrypt(blob));
+    const plain = JSON.parse(await decrypt(blob));
     expect(plain.pipeline_test_phone).toBe(CANON);
     expect(plain.pipeline_test_phone).toMatch(/^\+521[1-9]\d{9}$/);
     expect(plain.domain_name).toBe('acme.reservai.com.mx');

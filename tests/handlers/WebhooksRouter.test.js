@@ -10,10 +10,11 @@ jest.mock('../../utils/TechnicalInfoManager');
 jest.mock('../../utils/PaymentFanout');
 jest.mock('../../utils/ProvisionFanout');
 jest.mock('../../utils/InvoiceManager');
-jest.mock('../../utils/VaultCrypto');
 jest.mock('../../data/StripeInstanceGetter');
 jest.mock('../../utils/CreatePasswordsClient', () => ({
   createPasswords: jest.fn(async () => ({ ok: true, created: 4, skipped: 0 })),
+  encrypt: jest.fn(async () => '{"keyId":"v1"}'),
+  decrypt: jest.fn(async () => 'inbound-plain'),
 }));
 jest.mock('../../utils/captureOpsError', () => ({
   captureOpsError: jest.fn((e) => (e instanceof Error ? e : new Error(String(e)))),
@@ -33,7 +34,6 @@ const TechnicalInfoManager = require('../../utils/TechnicalInfoManager');
 const PaymentFanout = require('../../utils/PaymentFanout');
 const ProvisionFanout = require('../../utils/ProvisionFanout');
 const InvoiceManager = require('../../utils/InvoiceManager');
-const VaultCrypto = require('../../utils/VaultCrypto');
 const getStripeInstance = require('../../data/StripeInstanceGetter');
 const CreatePasswordsClient = require('../../utils/CreatePasswordsClient');
 const { captureStripeFailure, flushSentry } = require('../../utils/captureOpsError');
@@ -105,8 +105,8 @@ describe('WebhooksRouter', () => {
     TechnicalInfoManager.getBySetupSessionId.mockResolvedValue({ success: true, tenant: null });
     PaymentFanout.notifyBySubscriptionId.mockResolvedValue();
     ProvisionFanout.notify.mockResolvedValue({ success: true });
-    VaultCrypto.encrypt.mockReturnValue('{"keyId":"v1"}');
-    VaultCrypto.decrypt.mockReturnValue('inbound-plain');
+    CreatePasswordsClient.encrypt.mockResolvedValue('{"keyId":"v1"}');
+    CreatePasswordsClient.decrypt.mockResolvedValue('inbound-plain');
 
     InvoiceManager.getAccountAndPlanBySubscriptionId.mockResolvedValue({
       success: true,

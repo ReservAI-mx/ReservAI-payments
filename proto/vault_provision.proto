@@ -3,6 +3,8 @@ package passmanager.v1;
 
 service VaultProvision {
   rpc CreatePasswords (CreatePasswordsRequest) returns (CreatePasswordsResponse);
+  rpc Encrypt (EncryptRequest) returns (EncryptResponse);
+  rpc Decrypt (DecryptRequest) returns (DecryptResponse);
 }
 
 message PasswordItem {
@@ -25,4 +27,20 @@ message PasswordResult {
 
 message CreatePasswordsResponse {
   repeated PasswordResult results = 1;
+}
+
+message EncryptRequest {
+  string plaintext = 1;
+}
+
+message EncryptResponse {
+  string ciphertext = 1;
+}
+
+message DecryptRequest {
+  string ciphertext = 1;
+}
+
+message DecryptResponse {
+  string plaintext = 1;
 }

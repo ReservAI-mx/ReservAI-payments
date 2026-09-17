@@ -1,4 +1,4 @@
-const VaultCrypto = require('./VaultCrypto');
+const { decrypt } = require('./CreatePasswordsClient');
 const TechnicalInfoManager = require('./TechnicalInfoManager');
 const OpsJobManager = require('./OpsJobManager');
 const { captureOpsError } = require('./captureOpsError');
@@ -24,7 +24,7 @@ class PaymentFanout {
     let token = process.env.PAYMENT_FANOUT_TOKEN;
     if (!token) {
       try {
-        token = VaultCrypto.decrypt(tenant.inbound_auth_key);
+        token = await decrypt(tenant.inbound_auth_key);
       } catch (err) {
         return { success: false, error: err.message || 'decrypt failed' };
       }

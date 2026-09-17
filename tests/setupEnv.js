@@ -8,10 +8,6 @@ process.env.STRIPE_PRICE_ID_BASICO = process.env.STRIPE_PRICE_ID_BASICO || 'pric
 process.env.STRIPE_PRICE_ID_PREMIUM = process.env.STRIPE_PRICE_ID_PREMIUM || 'price_premium_test';
 process.env.STRIPE_PRICE_ID_SETUP = process.env.STRIPE_PRICE_ID_SETUP || 'price_setup_test';
 process.env.LIMIT_PER_PAGE = process.env.LIMIT_PER_PAGE || '6';
-process.env.VAULT_ACTIVE_KEY_ID = process.env.VAULT_ACTIVE_KEY_ID || 'v1';
-process.env.VAULT_MASTER_KEYS = process.env.VAULT_MASTER_KEYS || JSON.stringify([
-  { keyId: 'v1', keyBase64: Buffer.alloc(32, 7).toString('base64') },
-]);
 process.env.APIKEY_ADMIN = process.env.APIKEY_ADMIN || 'api-key-admin-test';
 process.env.APIKEY_ID_ADMIN = process.env.APIKEY_ID_ADMIN || 'admin-account-id';
 process.env.APIKEY_CLIENT = process.env.APIKEY_CLIENT || 'api-key-client-test';

@@ -1,6 +1,5 @@
 const crypto = require('crypto');
 const uuid = require('uuid');
-const VaultCrypto = require('./VaultCrypto');
 const TechnicalInfoManager = require('./TechnicalInfoManager');
 const CustomersManager = require('./CustomersManager');
 const AccountManager = require('./AccountManager');
@@ -8,7 +7,7 @@ const ProvisionFanout = require('./ProvisionFanout');
 const { normalizePipelineTestPhone } = require('./PhoneValidator');
 const { generateVaultSecrets, vaultItems } = require('./SetupSecretGenerator');
 const { buildEncryptedSetup } = require('./SetupBlobBuilder');
-const { createPasswords } = require('./CreatePasswordsClient');
+const { createPasswords, encrypt, decrypt } = require('./CreatePasswordsClient');
 const { captureStripeFailure } = require('./captureOpsError');
 
 function webhookCtx(session, phase, extra = {}) {
@@ -91,7 +90,7 @@ async function writeVaultAndBlob({ tenantId, accountId, subdomain, email, name, 
             pipeline_test_phone: phone,
         }, db, session, err);
     }
-    const { blob } = buildEncryptedSetup({
+    const { blob } = await buildEncryptedSetup({
         subdomain,
         client_email: email,
         chatwoot_client_name: name,
@@ -145,7 +144,7 @@ async function ensureEncryptedSetup(tenant, db, session = null) {
     }
     let inboundPlain;
     try {
-        inboundPlain = VaultCrypto.decrypt(tenant.inbound_auth_key);
+        inboundPlain = await decrypt(tenant.inbound_auth_key);
     } catch (err) {
         captureStripeFailure(err, webhookCtx(session, 'webhook.checkout.inbound', {
             technical_info_id: tenant.id,
@@ -220,7 +219,7 @@ async function handleSetupPaid(session, db) {
 
     const tenantId = uuid.v4();
     const inboundPlain = crypto.randomBytes(32).toString('hex');
-    const inboundBlob = VaultCrypto.encrypt(inboundPlain);
+    const inboundBlob = await encrypt(inboundPlain);
     const identity = await resolveEmailAndName(metadata.account_id, session.customer, db);
     if (!identity) {
         captureStripeFailure('setup email missing', webhookCtx(session, 'webhook.checkout.collect', {

@@ -1,5 +1,5 @@
 const crypto = require('crypto');
-const VaultCrypto = require('./VaultCrypto');
+const { encrypt } = require('./CreatePasswordsClient');
 
 function inboundAuthTokenHash(inboundPlain) {
     return crypto.createHash('sha256').update(String(inboundPlain), 'utf8').digest('hex');
@@ -34,7 +34,7 @@ function loadOrgConstants() {
     return { ...parsed, openai_api_key };
 }
 
-function buildEncryptedSetup({
+async function buildEncryptedSetup({
     subdomain,
     client_email,
     chatwoot_client_name,
@@ -62,7 +62,7 @@ function buildEncryptedSetup({
     };
     return {
         payload,
-        blob: VaultCrypto.encrypt(JSON.stringify(payload)),
+        blob: await encrypt(JSON.stringify(payload)),
     };
 }
 

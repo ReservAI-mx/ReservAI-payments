@@ -26,7 +26,13 @@ function loadProto() {
     VaultProvision = grpc.loadPackageDefinition(def).passmanager.v1.VaultProvision;
 }
 
-function canonicalJson(request) {
+function canonicalJson(method, request) {
+    if (method === 'ENCRYPT') {
+        return JSON.stringify({ plaintext: request?.plaintext ?? '' });
+    }
+    if (method === 'DECRYPT') {
+        return JSON.stringify({ ciphertext: request?.ciphertext ?? '' });
+    }
     const items = (request?.items || []).map((item) => ({
         name: item.name,
         password: item.password,
@@ -39,9 +45,12 @@ function canonicalJson(request) {
     });
 }
 
-function sign(request, secret) {
+function sign(method, request, secret) {
     const ts = Math.floor(Date.now() / 1000);
-    const signature = CryptoManager.createHMAC(`CREATE_PASSWORDS\n${ts}\n${canonicalJson(request)}`, secret);
+    const signature = CryptoManager.createHMAC(
+        `${method}\n${ts}\n${canonicalJson(method, request)}`,
+        secret
+    );
     return { ts, signature };
 }
 
@@ -61,7 +70,7 @@ function target() {
     return process.env.BACKEND_GRPC_URL || 'passmanager-backend-service.flycast:50051';
 }
 
-async function unaryCreatePasswords(request) {
+async function unary(method, request) {
     const secret = process.env.GRPC_HMAC_SECRET;
     if (!secret) {
         const err = new Error('GRPC_HMAC_SECRET missing');
@@ -69,16 +78,21 @@ async function unaryCreatePasswords(request) {
         throw err;
     }
     loadProto();
-    const { ts, signature } = sign(request, secret);
+    const { ts, signature } = sign(method, request, secret);
     const md = new grpc.Metadata();
     md.set('x-grpc-timestamp', String(ts));
     md.set('x-grpc-signature', signature);
 
     const client = new VaultProvision(target(), grpc.credentials.createInsecure());
     const deadline = new Date(Date.now() + DEADLINE_MS);
+    const rpc = {
+        CREATE_PASSWORDS: 'CreatePasswords',
+        ENCRYPT: 'Encrypt',
+        DECRYPT: 'Decrypt',
+    }[method];
     try {
         return await new Promise((resolve, reject) => {
-            client.CreatePasswords(request, md, { deadline }, (err, response) => {
+            client[rpc](request, md, { deadline }, (err, response) => {
                 if (err) reject(err);
                 else resolve(response);
             });
@@ -88,11 +102,11 @@ async function unaryCreatePasswords(request) {
     }
 }
 
-async function createPasswords(request) {
+async function withRetry(method, request) {
     let lastErr;
     for (let i = 0; i < MAX_ATTEMPTS; i++) {
         try {
-            return await unaryCreatePasswords(request);
+            return await unary(method, request);
         } catch (err) {
             lastErr = err;
             const canRetry = retryable(err) && i < MAX_ATTEMPTS - 1;
@@ -103,4 +117,18 @@ async function createPasswords(request) {
     throw lastErr;
 }
 
-module.exports = { createPasswords, retryable, canonicalJson };
+async function createPasswords(request) {
+    return withRetry('CREATE_PASSWORDS', request);
+}
+
+async function encrypt(plaintext) {
+    const res = await withRetry('ENCRYPT', { plaintext: String(plaintext) });
+    return res.ciphertext;
+}
+
+async function decrypt(ciphertext) {
+    const res = await withRetry('DECRYPT', { ciphertext: String(ciphertext) });
+    return res.plaintext;
+}
+
+module.exports = { createPasswords, encrypt, decrypt, retryable, canonicalJson };
