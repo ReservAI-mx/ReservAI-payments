@@ -78,7 +78,7 @@ async function writeVaultAndBlob({ tenantId, accountId, subdomain, email, name, 
     try {
         await createPasswords({
             account_id: accountId,
-            items: vaultItems(secrets),
+            items: vaultItems(subdomain, secrets),
         });
     } catch (err) {
         return persistCreatePasswordsFailure({

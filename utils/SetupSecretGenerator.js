@@ -5,10 +5,10 @@ const DIGITS = '0123456789';
 const ALPHANUM = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
 
 const VAULT_KEYS = [
-    { key: 'chatwoot_client_password', visibility: true, length: 20 },
-    { key: 'chatwoot_super_admin_password', visibility: false, length: 20 },
-    { key: 'chatwoot_crm_admin_password', visibility: false, length: 20 },
-    { key: 'minio_root_password', visibility: false, length: 24 },
+    { key: 'chatwoot_client_password', vaultSuffix: 'chatwoot_client_password', visibility: true, length: 20 },
+    { key: 'chatwoot_super_admin_password', vaultSuffix: 'chatwoot_super_admin_password', visibility: false, length: 20 },
+    { key: 'chatwoot_crm_admin_password', vaultSuffix: 'chatwoot_crm_admin_password', visibility: false, length: 20 },
+    { key: 'minio_root_password', vaultSuffix: 'minio', visibility: false, length: 24 },
 ];
 
 function randomPassword({ length = 20, requireSpecial = false } = {}) {
@@ -32,9 +32,11 @@ function generateVaultSecrets() {
     return secrets;
 }
 
-function vaultItems(secrets) {
+function vaultItems(subdomain, secrets) {
+    const slug = String(subdomain || '').trim().toLowerCase();
+    if (!slug) throw new Error('subdomain required for vault item names');
     return VAULT_KEYS.map((spec) => ({
-        name: spec.key,
+        name: `${slug}-${spec.vaultSuffix}`,
         password: secrets[spec.key],
         visibility: spec.visibility,
         updateablebyclient: false,

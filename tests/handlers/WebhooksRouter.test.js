@@ -463,16 +463,22 @@ describe('WebhooksRouter', () => {
     expect(ProvisionFanout.notify).not.toHaveBeenCalled();
   });
 
-  it('gRPC: solo chatwoot_client_password visible; las 4 updateablebyclient=false; nombres sin prefijo', async () => {
+  it('gRPC: nombres {subdomain}-chatwoot_* / {subdomain}-minio; solo client visible', async () => {
     await runSetupEvent(cloneSetupEvent('+5213321540248'));
     const entries = grpcItems();
     expect(entries).toHaveLength(4);
+    const subdomain = 'negocio';
+    expect(entries.map((e) => e.name).sort()).toEqual([
+      `${subdomain}-chatwoot_client_password`,
+      `${subdomain}-chatwoot_crm_admin_password`,
+      `${subdomain}-chatwoot_super_admin_password`,
+      `${subdomain}-minio`,
+    ].sort());
     const visible = entries.filter((e) => e.visibility === true);
     expect(visible).toHaveLength(1);
-    expect(visible[0].name).toBe('chatwoot_client_password');
+    expect(visible[0].name).toBe(`${subdomain}-chatwoot_client_password`);
     for (const entry of entries) {
       expect(entry.updateablebyclient).toBe(false);
-      expect(entry.name).not.toContain(':');
     }
   });
 
