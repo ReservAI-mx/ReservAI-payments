@@ -19,8 +19,11 @@ class FacturamaClient {
   }
 
   static async createCfdi(payload) {
+    const url = `${FacturamaClient.baseUrl()}/3/cfdis`;
+    const started = Date.now();
     try {
-      const response = await fetch(`${FacturamaClient.baseUrl()}/3/cfdis`, {
+      console.log(`[facturama] POST /3/cfdis rfc=${payload?.Receiver?.Rfc || '-'} place=${payload?.ExpeditionPlace || '-'}`);
+      const response = await fetch(url, {
         method: 'POST',
         headers: {
           Authorization: FacturamaClient.authHeader(),
@@ -29,15 +32,20 @@ class FacturamaClient {
         body: JSON.stringify(payload),
       });
       const data = await response.json().catch(() => ({}));
+      const ms = Date.now() - started;
       if (!response.ok) {
+        const error = typeof data === 'object' ? JSON.stringify(data) : String(data);
+        console.error(`[facturama] stamp failed status=${response.status} ms=${ms} error=${error}`);
         return {
           success: false,
-          error: typeof data === 'object' ? JSON.stringify(data) : String(data),
+          error,
           status: response.status,
         };
       }
+      console.log(`[facturama] stamp ok ms=${ms} id=${data.Id || data.id || '-'}`);
       return { success: true, data };
     } catch (error) {
+      console.error(`[facturama] stamp network error ms=${Date.now() - started}: ${error.message}`);
       return { success: false, error: error.message };
     }
   }

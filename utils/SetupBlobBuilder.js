@@ -61,19 +61,14 @@ function loadOrgConstants() {
         throw err;
     }
 
-    const openai_api_key = process.env.OPENAI_API_KEY;
-    if (!openai_api_key) {
-        const err = new Error('OPENAI_API_KEY missing');
-        err.code = 'OPENAI_API_KEY_MISSING';
-        throw err;
-    }
-    return { ...parsed, openai_api_key };
+    return { ...parsed };
 }
 
 /**
  * Plaintext del blob = setup.json completo (org + tenant).
  * VPS Bootstrap lo escribe tal cual; generate_env.py ya no necesita setup.shared.json en el VPS.
  * chatwoot_client_email = client_email (mismo contrato que generate_env._load_merged_setup).
+ * openai_api_key: por tenant (OpenAICredentialsManager), no env compartido.
  */
 async function buildEncryptedSetup({
     subdomain,
@@ -82,12 +77,19 @@ async function buildEncryptedSetup({
     pipeline_test_phone,
     inboundPlain,
     secrets,
+    openai_api_key,
     env = 'production',
 }) {
+    if (!openai_api_key) {
+        const err = new Error('openai_api_key required');
+        err.code = 'OPENAI_API_KEY_MISSING';
+        throw err;
+    }
     const domain_name = `${subdomain}.${process.env.BASE_DOMAIN || 'reservai.com.mx'}`;
     const org = loadOrgConstants();
     const payload = {
         ...org,
+        openai_api_key,
         domain_name,
         client_email,
         chatwoot_client_email: client_email,

@@ -24,6 +24,7 @@ describe('SetupBlobBuilder', () => {
       chatwoot_client_name: 'Acme',
       pipeline_test_phone: CANON,
       inboundPlain: 'inbound-plain',
+      openai_api_key: 'sk-per-tenant-test',
       secrets: {
         chatwoot_client_password: 'ClientPass1!',
         chatwoot_super_admin_password: 'SuperAdmin1!',
@@ -33,7 +34,7 @@ describe('SetupBlobBuilder', () => {
     });
     expect(payload.pipeline_test_phone).toBe(CANON);
     expect(payload.ssl_email).toBeTruthy();
-    expect(payload.openai_api_key).toBeTruthy();
+    expect(payload.openai_api_key).toBe('sk-per-tenant-test');
     expect(payload.google_client_id).toBeTruthy();
     expect(payload.oauth_client_secret).toBeTruthy();
     expect(payload.chatwoot_client_email).toBe('cliente@acme.com');
@@ -63,6 +64,7 @@ describe('SetupBlobBuilder', () => {
         chatwoot_client_name: 'Acme',
         pipeline_test_phone: CANON,
         inboundPlain: 'inbound-plain',
+        openai_api_key: 'sk-per-tenant-test',
         secrets: {
           chatwoot_client_password: 'ClientPass1!',
           chatwoot_super_admin_password: 'SuperAdmin1!',

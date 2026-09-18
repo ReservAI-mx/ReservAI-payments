@@ -8,6 +8,7 @@ const { normalizePipelineTestPhone } = require('./PhoneValidator');
 const { generateVaultSecrets, vaultItems } = require('./SetupSecretGenerator');
 const { buildEncryptedSetup } = require('./SetupBlobBuilder');
 const { createPasswords, encrypt, decrypt } = require('./CreatePasswordsClient');
+const { ensureCredentials } = require('./OpenAICredentialsManager');
 const { captureStripeFailure } = require('./captureOpsError');
 
 function webhookCtx(session, phase, extra = {}) {
@@ -72,7 +73,39 @@ async function persistCreatePasswordsFailure(row, db, session, err) {
     return { success: true, tenant: { ...row, provision_error: 'create_passwords', encrypted_setup_json: null } };
 }
 
-async function writeVaultAndBlob({ tenantId, accountId, subdomain, email, name, phone, inboundPlain, inboundBlob, plannedPlan, setupSessionId, db, session }) {
+async function persistOpenAIFailure(row, db, session, err) {
+    captureStripeFailure(err, webhookCtx(session, 'webhook.checkout.openai_credentials', {
+        subdomain: row.subdomain,
+        technical_info_id: row.id,
+    }));
+    if (row.setup_session_id) {
+        return TechnicalInfoManager.insertFromSetupSession({
+            ...row,
+            encrypted_setup_json: null,
+            provision_error: 'openai_credentials',
+            openai_service_account_id: row.openai_service_account_id || null,
+            openai_api_key_id: row.openai_api_key_id || null,
+        }, db);
+    }
+    await TechnicalInfoManager.setProvisionError(row.id, 'openai_credentials', db);
+    return { success: true, tenant: { ...row, provision_error: 'openai_credentials', encrypted_setup_json: null } };
+}
+
+async function writeVaultAndBlob({
+    tenantId,
+    accountId,
+    subdomain,
+    email,
+    name,
+    phone,
+    inboundPlain,
+    inboundBlob,
+    plannedPlan,
+    setupSessionId,
+    db,
+    session,
+    existingServiceAccountId = null,
+}) {
     const secrets = generateVaultSecrets();
     try {
         await createPasswords({
@@ -90,6 +123,26 @@ async function writeVaultAndBlob({ tenantId, accountId, subdomain, email, name, 
             pipeline_test_phone: phone,
         }, db, session, err);
     }
+
+    let openai;
+    try {
+        openai = await ensureCredentials({
+            subdomain,
+            serviceAccountId: existingServiceAccountId,
+        });
+    } catch (err) {
+        return persistOpenAIFailure({
+            id: tenantId,
+            account_id: accountId,
+            subdomain,
+            planned_plan: plannedPlan,
+            inbound_auth_key: inboundBlob,
+            setup_session_id: setupSessionId,
+            pipeline_test_phone: phone,
+            openai_service_account_id: existingServiceAccountId,
+        }, db, session, err);
+    }
+
     const { blob } = await buildEncryptedSetup({
         subdomain,
         client_email: email,
@@ -97,6 +150,7 @@ async function writeVaultAndBlob({ tenantId, accountId, subdomain, email, name, 
         pipeline_test_phone: phone,
         inboundPlain,
         secrets,
+        openai_api_key: openai.apiKey,
     });
     if (setupSessionId) {
         return TechnicalInfoManager.insertFromSetupSession({
@@ -109,9 +163,20 @@ async function writeVaultAndBlob({ tenantId, accountId, subdomain, email, name, 
             encrypted_setup_json: blob,
             pipeline_test_phone: phone,
             provision_error: null,
+            openai_service_account_id: openai.serviceAccountId,
+            openai_api_key_id: openai.apiKeyId,
         }, db);
     }
-    const updated = await TechnicalInfoManager.updateEncryptedSetup(tenantId, blob, phone, db);
+    const updated = await TechnicalInfoManager.updateEncryptedSetup(
+        tenantId,
+        blob,
+        phone,
+        db,
+        {
+            openai_service_account_id: openai.serviceAccountId,
+            openai_api_key_id: openai.apiKeyId,
+        }
+    );
     if (!updated.success) return updated;
     if (!updated.tenant) {
         const fresh = await TechnicalInfoManager.getById(tenantId, db);
@@ -165,10 +230,12 @@ async function ensureEncryptedSetup(tenant, db, session = null) {
         setupSessionId: null,
         db,
         session,
+        existingServiceAccountId: tenant.openai_service_account_id || null,
     });
     if (!result.success) return result;
     if (!result.tenant?.encrypted_setup_json) {
-        return { success: false, error: 'create_passwords', tenant: result.tenant };
+        const errCode = result.tenant?.provision_error || 'create_passwords';
+        return { success: false, error: errCode, tenant: result.tenant };
     }
     return { success: true, tenant: result.tenant };
 }

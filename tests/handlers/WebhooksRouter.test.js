@@ -16,6 +16,13 @@ jest.mock('../../utils/CreatePasswordsClient', () => ({
   encrypt: jest.fn(async () => '{"keyId":"v1"}'),
   decrypt: jest.fn(async () => 'inbound-plain'),
 }));
+jest.mock('../../utils/OpenAICredentialsManager', () => ({
+  ensureCredentials: jest.fn(async () => ({
+    serviceAccountId: 'svc_acct_test',
+    apiKeyId: 'key_test',
+    apiKey: 'sk-per-tenant-test',
+  })),
+}));
 jest.mock('../../utils/captureOpsError', () => ({
   captureOpsError: jest.fn((e) => (e instanceof Error ? e : new Error(String(e)))),
   captureStripeFailure: jest.fn((e) => (e instanceof Error ? e : new Error(String(e)))),
@@ -36,6 +43,7 @@ const ProvisionFanout = require('../../utils/ProvisionFanout');
 const InvoiceManager = require('../../utils/InvoiceManager');
 const getStripeInstance = require('../../data/StripeInstanceGetter');
 const CreatePasswordsClient = require('../../utils/CreatePasswordsClient');
+const { ensureCredentials } = require('../../utils/OpenAICredentialsManager');
 const { captureStripeFailure, flushSentry } = require('../../utils/captureOpsError');
 const WebhooksRouter = require('../../handlers/WebhooksRouter');
 const { loadStripeFixture } = require('../helpers/stripeFixtures');
@@ -122,6 +130,11 @@ describe('WebhooksRouter', () => {
       invoices: { retrieve: jest.fn().mockResolvedValue({}) },
     });
     CreatePasswordsClient.createPasswords.mockResolvedValue({ ok: true, created: 4, skipped: 0 });
+    ensureCredentials.mockResolvedValue({
+      serviceAccountId: 'svc_acct_test',
+      apiKeyId: 'key_test',
+      apiKey: 'sk-per-tenant-test',
+    });
   });
 
   async function runWebhook(fixtureName) {
@@ -486,6 +499,16 @@ describe('WebhooksRouter', () => {
     CreatePasswordsClient.createPasswords.mockRejectedValueOnce(new Error('UNAVAILABLE'));
     await runSetupEvent(cloneSetupEvent('+5213321540248'));
     expect(ProvisionFanout.notify).not.toHaveBeenCalled();
+  });
+
+  it('OpenAI fail → no fanout y provision_error openai_credentials', async () => {
+    ensureCredentials.mockRejectedValueOnce(new Error('OpenAI down'));
+    await runSetupEvent(cloneSetupEvent('+5213321540248'));
+    expect(ProvisionFanout.notify).not.toHaveBeenCalled();
+    expect(TechnicalInfoManager.insertFromSetupSession).toHaveBeenCalledWith(
+      expect.objectContaining({ provision_error: 'openai_credentials', encrypted_setup_json: null }),
+      db
+    );
   });
 
   it('email failure still responded 200 first', async () => {

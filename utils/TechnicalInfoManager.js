@@ -60,6 +60,8 @@ class TechnicalInfoManager {
                 row.encrypted_setup_json || null,
                 row.pipeline_test_phone || null,
                 row.provision_error || null,
+                row.openai_service_account_id || null,
+                row.openai_api_key_id || null,
             ]);
             return { success: true, tenant: result.rows[0] || null };
         } catch (error) {
@@ -181,12 +183,14 @@ class TechnicalInfoManager {
         }
     }
 
-    static async updateEncryptedSetup(id, encrypted_setup_json, pipeline_test_phone, db) {
+    static async updateEncryptedSetup(id, encrypted_setup_json, pipeline_test_phone, db, openai = {}) {
         try {
             const result = await db.query(UpdateEncryptedSetupJson, [
                 id,
                 encrypted_setup_json,
                 pipeline_test_phone || null,
+                openai.openai_service_account_id || null,
+                openai.openai_api_key_id || null,
             ]);
             return { success: true, tenant: result.rows[0] || null };
         } catch (error) {

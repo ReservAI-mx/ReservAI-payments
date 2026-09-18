@@ -54,6 +54,10 @@ const CreateInvoiceFromPayment = async (req, res) => {
     return res.status(500).json({ error: 'Internal server error' });
   }
 
+  console.log(
+    `[invoice] createFromPayment start payment=${paymentHistoryId} account=${resolved.accountId}`
+  );
+
   const result = await InvoiceManager.createFromPayment(
     resolved.accountId,
     paymentHistoryId,
@@ -63,8 +67,11 @@ const CreateInvoiceFromPayment = async (req, res) => {
 
   if (!result.success) {
     const client = toClientError(result);
+    console.error(
+      `[invoice] createFromPayment failed payment=${paymentHistoryId} status=${result.status || 500} error=${result.error || 'unknown'}`
+    );
     if (client.status >= 500 || !CLIENT_SAFE.has(String(result.error || ''))) {
-      // Detalle real (sello, CSD, Facturama JSON) solo a Sentry.
+      // Detalle real (sello, CSD, Facturama JSON) también a Sentry.
       captureStripeFailure(result.error, {
         phase: 'billing.invoices.create',
         area: 'facturama',
@@ -76,6 +83,9 @@ const CreateInvoiceFromPayment = async (req, res) => {
     return res.status(client.status).json({ error: client.error });
   }
 
+  console.log(
+    `[invoice] createFromPayment ok payment=${paymentHistoryId} already_exists=${!!result.already_exists}`
+  );
   return res.status(result.already_exists ? 200 : 201).json({
     data: result.invoice,
     already_exists: !!result.already_exists,
