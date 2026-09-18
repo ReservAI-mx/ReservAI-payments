@@ -38,11 +38,26 @@ process.env.RESERVAI_SETUP_CONSTANTS = process.env.RESERVAI_SETUP_CONSTANTS || J
   ssl_email: 'ops@reservai.com.mx',
   chatwoot_super_admin_email: 'admin@reservai.com.mx',
   chatwoot_crm_admin_email: 'crm@reservai.com.mx',
+  chatwoot_crm_admin_name: 'CRM Admin',
+  chatwoot_account_name: 'ReservAI',
+  chatwoot_client_role: 'administrator',
   admin_email: 'admin@reservai.com.mx',
   google_client_id: 'gid-test',
   google_client_secret: 'gsecret-test',
   oauth_client_secret: 'oauth-test',
   minio_root_user: 'root',
+  // = setup.shared (WhatsApp Embedded Signup / SMTP / Sentry opcionales pero típicos)
+  whatsapp_app_id: 'wa-app-test',
+  whatsapp_configuration_id: 'wa-config-test',
+  whatsapp_app_secret: 'wa-secret-test',
+  whatsapp_api_version: 'v22.0',
+  smtp_host: 'smtp.example.com',
+  smtp_port: 465,
+  smtp_user: 'support@example.com',
+  smtp_password: 'smtp-test',
+  smtp_from: 'support@example.com',
+  smtp_use_tls: true,
+  sentry_dsn: 'https://sentry.example/1',
 });
 
 global.IS_PRODUCTION = false;

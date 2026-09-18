@@ -1,6 +1,29 @@
 const crypto = require('crypto');
 const { encrypt } = require('./CreatePasswordsClient');
 
+/** Claves de organización (= Setup/setup.shared.json). Obligatorias para generate_env.py. */
+const ORG_REQUIRED_FIELDS = [
+    'ssl_email',
+    'chatwoot_super_admin_email',
+    'chatwoot_crm_admin_email',
+    'admin_email',
+    'minio_root_user',
+    'google_client_id',
+    'google_client_secret',
+    'oauth_client_secret',
+    'whatsapp_app_id',
+    'whatsapp_configuration_id',
+    'whatsapp_app_secret',
+    'whatsapp_api_version',
+    'smtp_host',
+    'smtp_port',
+    'smtp_user',
+    'smtp_password',
+    'smtp_from',
+    'smtp_use_tls',
+    'sentry_dsn',
+];
+
 function inboundAuthTokenHash(inboundPlain) {
     return crypto.createHash('sha256').update(String(inboundPlain), 'utf8').digest('hex');
 }
@@ -25,6 +48,19 @@ function loadOrgConstants() {
         err.code = 'SETUP_CONSTANTS_INVALID';
         throw err;
     }
+    // chatwoot_client_email no es de org: se copia de client_email del tenant.
+    delete parsed.chatwoot_client_email;
+
+    const missing = ORG_REQUIRED_FIELDS.filter((key) => {
+        const value = parsed[key];
+        return value === undefined || value === null || String(value).trim() === '';
+    });
+    if (missing.length) {
+        const err = new Error(`RESERVAI_SETUP_CONSTANTS incomplete: ${missing.join(', ')}`);
+        err.code = 'SETUP_CONSTANTS_INCOMPLETE';
+        throw err;
+    }
+
     const openai_api_key = process.env.OPENAI_API_KEY;
     if (!openai_api_key) {
         const err = new Error('OPENAI_API_KEY missing');
@@ -34,6 +70,11 @@ function loadOrgConstants() {
     return { ...parsed, openai_api_key };
 }
 
+/**
+ * Plaintext del blob = setup.json completo (org + tenant).
+ * VPS Bootstrap lo escribe tal cual; generate_env.py ya no necesita setup.shared.json en el VPS.
+ * chatwoot_client_email = client_email (mismo contrato que generate_env._load_merged_setup).
+ */
 async function buildEncryptedSetup({
     subdomain,
     client_email,
@@ -66,4 +107,9 @@ async function buildEncryptedSetup({
     };
 }
 
-module.exports = { buildEncryptedSetup, inboundAuthTokenHash, loadOrgConstants };
+module.exports = {
+    buildEncryptedSetup,
+    inboundAuthTokenHash,
+    loadOrgConstants,
+    ORG_REQUIRED_FIELDS,
+};
