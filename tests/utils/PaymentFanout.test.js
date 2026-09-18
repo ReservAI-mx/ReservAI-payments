@@ -1,8 +1,8 @@
-jest.mock('../../utils/VaultCrypto');
+jest.mock('../../utils/CreatePasswordsClient');
 jest.mock('../../utils/TechnicalInfoManager');
 jest.mock('../../utils/OpsJobManager');
 
-const VaultCrypto = require('../../utils/VaultCrypto');
+const CreatePasswordsClient = require('../../utils/CreatePasswordsClient');
 const TechnicalInfoManager = require('../../utils/TechnicalInfoManager');
 const OpsJobManager = require('../../utils/OpsJobManager');
 const PaymentFanout = require('../../utils/PaymentFanout');
@@ -66,7 +66,7 @@ describe('PaymentFanout', () => {
     });
     OpsJobManager.markSucceeded.mockResolvedValue({});
     delete process.env.PAYMENT_FANOUT_TOKEN;
-    VaultCrypto.decrypt.mockReturnValue('inbound-plain');
+    CreatePasswordsClient.decrypt.mockResolvedValue('inbound-plain');
     const db = { query: jest.fn().mockResolvedValue({ rows: [] }) };
     const fetchMock = jest.spyOn(global, 'fetch').mockResolvedValue({ ok: true });
 

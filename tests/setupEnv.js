@@ -8,10 +8,6 @@ process.env.STRIPE_PRICE_ID_BASICO = process.env.STRIPE_PRICE_ID_BASICO || 'pric
 process.env.STRIPE_PRICE_ID_PREMIUM = process.env.STRIPE_PRICE_ID_PREMIUM || 'price_premium_test';
 process.env.STRIPE_PRICE_ID_SETUP = process.env.STRIPE_PRICE_ID_SETUP || 'price_setup_test';
 process.env.LIMIT_PER_PAGE = process.env.LIMIT_PER_PAGE || '6';
-process.env.VAULT_ACTIVE_KEY_ID = process.env.VAULT_ACTIVE_KEY_ID || 'v1';
-process.env.VAULT_MASTER_KEYS = process.env.VAULT_MASTER_KEYS || JSON.stringify([
-  { keyId: 'v1', keyBase64: Buffer.alloc(32, 7).toString('base64') },
-]);
 process.env.APIKEY_ADMIN = process.env.APIKEY_ADMIN || 'api-key-admin-test';
 process.env.APIKEY_ID_ADMIN = process.env.APIKEY_ID_ADMIN || 'admin-account-id';
 process.env.APIKEY_CLIENT = process.env.APIKEY_CLIENT || 'api-key-client-test';
@@ -34,5 +30,35 @@ process.env.DB_PORT = process.env.DB_PORT || '5432';
 process.env.DB_NAME = process.env.DB_NAME || 'testdb';
 process.env.DB_USER = process.env.DB_USER || 'test';
 process.env.DB_PASSWORD = process.env.DB_PASSWORD || 'test';
+process.env.BACKEND_GRPC_URL = process.env.BACKEND_GRPC_URL || 'passmanager-backend-service.flycast:50051';
+process.env.GRPC_HMAC_SECRET = process.env.GRPC_HMAC_SECRET || 'test-grpc-hmac-secret';
+process.env.BASE_DOMAIN = process.env.BASE_DOMAIN || 'reservai.com.mx';
+process.env.OPENAI_ADMIN_KEY = process.env.OPENAI_ADMIN_KEY || 'sk-admin-test';
+process.env.OPENAI_PROJECT_ID = process.env.OPENAI_PROJECT_ID || 'proj_test';
+process.env.RESERVAI_SETUP_CONSTANTS = process.env.RESERVAI_SETUP_CONSTANTS || JSON.stringify({
+  ssl_email: 'ops@reservai.com.mx',
+  chatwoot_super_admin_email: 'admin@reservai.com.mx',
+  chatwoot_crm_admin_email: 'crm@reservai.com.mx',
+  chatwoot_crm_admin_name: 'CRM Admin',
+  chatwoot_account_name: 'ReservAI',
+  chatwoot_client_role: 'administrator',
+  admin_email: 'admin@reservai.com.mx',
+  google_client_id: 'gid-test',
+  google_client_secret: 'gsecret-test',
+  oauth_client_secret: 'oauth-test',
+  minio_root_user: 'root',
+  // = setup.shared (WhatsApp Embedded Signup / SMTP / Sentry opcionales pero típicos)
+  whatsapp_app_id: 'wa-app-test',
+  whatsapp_configuration_id: 'wa-config-test',
+  whatsapp_app_secret: 'wa-secret-test',
+  whatsapp_api_version: 'v22.0',
+  smtp_host: 'smtp.example.com',
+  smtp_port: 465,
+  smtp_user: 'support@example.com',
+  smtp_password: 'smtp-test',
+  smtp_from: 'support@example.com',
+  smtp_use_tls: true,
+  sentry_dsn: 'https://sentry.example/1',
+});
 
 global.IS_PRODUCTION = false;

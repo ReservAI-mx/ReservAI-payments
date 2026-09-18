@@ -7,7 +7,7 @@ class EmailManager {
             .filter((email, index, list) => list.indexOf(email) === index);
     }
 
-    static async sendEmailToCustomer(email, subject, content, text_content) {
+    static async sendEmailToCustomer(email, subject, content, text_content, attachments = null) {
         try {
             const nodemailer = require('nodemailer');
             
@@ -30,6 +30,10 @@ class EmailManager {
                 html: content,
                 text: text_content
             };
+
+            if (Array.isArray(attachments) && attachments.length > 0) {
+                mailOptions.attachments = attachments;
+            }
 
             await transporter.sendMail(mailOptions);
             // Log de email removido por seguridad

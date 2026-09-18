@@ -28,6 +28,18 @@ const RetryProvision = require('../handlers/RetryProvision');
 const ListJobs = require('../handlers/ListJobs');
 const GetJob = require('../handlers/GetJob');
 const RetryJob = require('../handlers/RetryJob');
+const ListProducts = require('../handlers/ListProducts');
+const CreateProduct = require('../handlers/CreateProduct');
+const UpdateProduct = require('../handlers/UpdateProduct');
+const GetMyFiscalInfo = require('../handlers/GetMyFiscalInfo');
+const UpsertMyFiscalInfo = require('../handlers/UpsertMyFiscalInfo');
+const PatchMyFiscalInfo = require('../handlers/PatchMyFiscalInfo');
+const DeleteMyFiscalInfo = require('../handlers/DeleteMyFiscalInfo');
+const GetFiscalByAccountId = require('../handlers/GetFiscalByAccountId');
+const CreateInvoiceFromPayment = require('../handlers/CreateInvoiceFromPayment');
+const { DownloadInvoicePdf, DownloadInvoiceXml } = require('../handlers/DownloadInvoiceFile');
+const DownloadTicketPdf = require('../handlers/DownloadTicketPdf');
+const { ListMyPayments, ListAccountPayments } = require('../handlers/ListPayments');
 
 router.use(PathSecurityValidator.middleware());
 
@@ -60,6 +72,41 @@ router.delete("/tenants/:id", ...withAdmin, TechnicalInfoExistByID, DeleteTenant
 router.get("/jobs", ...withAdmin, ListJobs);
 router.get("/jobs/:id", ...withAdmin, GetJob);
 router.post("/jobs/:id/retry", ...withAdmin, RetryJob);
+
+router.get("/products", ...withAdmin, ListProducts);
+router.post("/products", ...withAdmin, CreateProduct);
+router.patch("/products/:id", ...withAdmin, UpdateProduct);
+
+router.get("/fiscal", ...withAccess, GetMyFiscalInfo);
+router.put("/fiscal", ...withAccess, UpsertMyFiscalInfo);
+router.patch("/fiscal", ...withAccess, PatchMyFiscalInfo);
+router.delete("/fiscal", ...withAccess, DeleteMyFiscalInfo);
+router.get("/fiscal/:account_id", ...withAdmin, GetFiscalByAccountId);
+
+router.get("/payments", ...withAccess, ListMyPayments);
+router.get("/accounts/:account_id/payments", ...withAdmin, ListAccountPayments);
+
+router.post(
+  "/invoices/from-payment/:payment_history_id",
+  ...withAccess,
+  CreateInvoiceFromPayment
+);
+router.get("/invoices/:id/pdf", ...withAccess, DownloadInvoicePdf);
+router.get("/invoices/:id/xml", ...withAccess, DownloadInvoiceXml);
+router.get("/tickets/:payment_history_id/pdf", ...withAccess, DownloadTicketPdf);
+
+router.post(
+  "/accounts/:account_id/invoices/from-payment/:payment_history_id",
+  ...withAdmin,
+  CreateInvoiceFromPayment
+);
+router.get("/accounts/:account_id/invoices/:id/pdf", ...withAdmin, DownloadInvoicePdf);
+router.get("/accounts/:account_id/invoices/:id/xml", ...withAdmin, DownloadInvoiceXml);
+router.get(
+  "/accounts/:account_id/tickets/:payment_history_id/pdf",
+  ...withAdmin,
+  DownloadTicketPdf
+);
 
 router.use((req, res) => {
     return res.status(404).json({

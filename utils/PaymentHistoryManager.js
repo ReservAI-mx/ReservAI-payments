@@ -11,7 +11,11 @@ class PaymentHistoryManager {
                 paymentData.stripe_invoice_id,
                 paymentData.status,
                 paymentData.amount,
-                paymentData.created_at
+                paymentData.ticket_pdf,
+                paymentData.stripe_invoice_url,
+                paymentData.created_at,
+                paymentData.stripe_customer_id || null,
+                paymentData.stripe_checkout_session_id || null,
             ]);
             return {
                 success: true,
@@ -29,4 +33,3 @@ class PaymentHistoryManager {
 }
 
 module.exports = PaymentHistoryManager;
-

@@ -170,6 +170,8 @@ describe('smoke: API wiring', () => {
     { method: 'get', path: '/api/billing/setup' },
     { method: 'post', path: '/api/billing/activate' },
     { method: 'get', path: '/api/billing/tenants' },
+    { method: 'get', path: '/api/billing/products' },
+    { method: 'post', path: '/api/billing/products' },
   ];
 
   test.each(protectedRoutes)('$method $path sin cookie → 418', async ({ method, path }) => {

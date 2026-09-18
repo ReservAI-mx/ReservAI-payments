@@ -62,7 +62,8 @@ const ActivateSubscription = async (req, res) => {
         lookup.setup.planned_plan,
         portalUrl,
         portalUrl,
-        stripe
+        stripe,
+        db
     );
     if (!result.success) {
         captureStripeFailure(result.error || 'Error creating checkout session', {
