@@ -10,11 +10,12 @@ const { getDB } = require('../../data/connectDB');
 const { tick } = require('../../utils/OpsJobPoller');
 
 describe('OpsJobPoller', () => {
-  const db = {};
+  const db = { query: jest.fn() };
 
   beforeEach(() => {
     jest.clearAllMocks();
-    getDB.mockReturnValue(db);
+    db.query = jest.fn();
+    getDB.mockResolvedValue(db);
     jest.spyOn(OpsJobManager, 'claimNext');
     jest.spyOn(OpsJobManager, 'markInFlight').mockResolvedValue({});
     jest.spyOn(OpsJobManager, 'markFailed').mockResolvedValue({ status: 'failed' });

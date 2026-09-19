@@ -81,9 +81,12 @@ async function tick() {
   try {
     let db;
     try {
-      db = getDB();
+      db = await getDB();
     } catch {
       db = await connectDB();
+    }
+    if (!db || typeof db.query !== 'function') {
+      throw new Error('DB pool unavailable (db.query is not a function)');
     }
     for (let i = 0; i < 5; i++) {
       const job = await OpsJobManager.claimNext(lockedBy, db);

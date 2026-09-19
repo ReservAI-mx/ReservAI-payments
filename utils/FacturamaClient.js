@@ -18,6 +18,25 @@ class FacturamaClient {
     return `Basic ${token}`;
   }
 
+  /** Mensaje útil: Facturama a veces responde {} vacío en 4xx. */
+  static formatHttpError(data, status, path) {
+    const keys = data && typeof data === 'object' ? Object.keys(data) : [];
+    const hint =
+      (typeof data?.Message === 'string' && data.Message) ||
+      (typeof data?.message === 'string' && data.message) ||
+      (typeof data?.ExceptionMessage === 'string' && data.ExceptionMessage) ||
+      (data?.ModelState ? JSON.stringify(data.ModelState) : null) ||
+      (Array.isArray(data) ? JSON.stringify(data) : null) ||
+      (keys.length === 0 ? 'empty JSON body (revisa auth, URL o payload)' : null);
+    const body =
+      data == null
+        ? ''
+        : typeof data === 'object'
+          ? JSON.stringify(data).slice(0, 500)
+          : String(data).slice(0, 500);
+    return `Facturama HTTP ${status} ${path}: ${hint || body}`;
+  }
+
   static async createCfdi(payload) {
     const url = `${FacturamaClient.baseUrl()}/3/cfdis`;
     const started = Date.now();
@@ -34,7 +53,7 @@ class FacturamaClient {
       const data = await response.json().catch(() => ({}));
       const ms = Date.now() - started;
       if (!response.ok) {
-        const error = typeof data === 'object' ? JSON.stringify(data) : String(data);
+        const error = FacturamaClient.formatHttpError(data, response.status, '/3/cfdis');
         console.error(`[facturama] stamp failed status=${response.status} ms=${ms} error=${error}`);
         return {
           success: false,
@@ -63,7 +82,7 @@ class FacturamaClient {
       if (!response.ok) {
         return {
           success: false,
-          error: typeof data === 'object' ? JSON.stringify(data) : String(data),
+          error: FacturamaClient.formatHttpError(data, response.status, `/cfdi/${format}/issued`),
           status: response.status,
         };
       }
@@ -98,7 +117,7 @@ class FacturamaClient {
       if (!response.ok) {
         return {
           success: false,
-          error: typeof data === 'object' ? JSON.stringify(data) : String(data),
+          error: FacturamaClient.formatHttpError(data, response.status, '/api/customers/validate'),
           status: response.status,
         };
       }
@@ -110,8 +129,13 @@ class FacturamaClient {
 
   /** Alta en catálogo API Web. POST /api/Product */
   static async createProduct(payload) {
+    const path = '/api/Product';
+    const url = `${FacturamaClient.baseUrl()}${path}`;
     try {
-      const response = await fetch(`${FacturamaClient.baseUrl()}/api/Product`, {
+      console.log(
+        `[facturama] POST ${path} name=${payload?.Name || '-'} code=${payload?.CodeProdServ || '-'} unit=${payload?.UnitCode || '-'}`
+      );
+      const response = await fetch(url, {
         method: 'POST',
         headers: {
           Authorization: FacturamaClient.authHeader(),
@@ -121,14 +145,18 @@ class FacturamaClient {
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) {
+        const error = FacturamaClient.formatHttpError(data, response.status, path);
+        console.error(`[facturama] createProduct failed: ${error}`);
         return {
           success: false,
-          error: typeof data === 'object' ? JSON.stringify(data) : String(data),
+          error,
           status: response.status,
         };
       }
+      console.log(`[facturama] createProduct ok id=${data.Id || data.id || '-'}`);
       return { success: true, data };
     } catch (error) {
+      console.error(`[facturama] createProduct network error: ${error.message}`);
       return { success: false, error: error.message };
     }
   }

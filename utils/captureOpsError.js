@@ -1,7 +1,27 @@
 const Sentry = require('../instrument-sentry');
 
+function toError(err) {
+  if (err instanceof Error) return err;
+  if (typeof err === 'string') {
+    if (err === '{}' || err === '[]') {
+      return new Error('empty error payload from upstream (revisa logs de Facturama/API)');
+    }
+    return new Error(err);
+  }
+  if (err && typeof err === 'object') {
+    try {
+      const json = JSON.stringify(err);
+      if (json && json !== '{}' && json !== '[]') return new Error(json);
+    } catch {
+      /* ignore */
+    }
+    return new Error('empty error object from upstream');
+  }
+  return new Error(String(err));
+}
+
 function captureOpsError(err, context = {}) {
-  const error = err instanceof Error ? err : new Error(String(err));
+  const error = toError(err);
   const phase = context.phase || context.area || 'ops';
   const extras = [];
   if (context.event_type) extras.push(`event=${context.event_type}`);

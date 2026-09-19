@@ -166,8 +166,8 @@ if (require.main === module) {
   process.on('SIGTERM', async () => {
     console.log('🛑 Recibida señal SIGTERM, cerrando servidor...');
     try {
-      const db = getDB();
-      await db.close();
+      const db = await getDB();
+      await db.end();
     } catch (error) {
       console.error('Error al cerrar la base de datos:', error.message);
     }
@@ -177,8 +177,8 @@ if (require.main === module) {
   process.on('SIGINT', async () => {
     console.log('🛑 Recibida señal SIGINT, cerrando servidor...');
     try {
-      const db = getDB();
-      await db.close();
+      const db = await getDB();
+      await db.end();
     } catch (error) {
       console.error('Error al cerrar la base de datos:', error.message);
     }
