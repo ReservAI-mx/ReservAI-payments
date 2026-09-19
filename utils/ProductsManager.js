@@ -3,7 +3,9 @@ const ListProducts = require('../queries/ListProducts');
 const SetProductActive = require('../queries/SetProductActive');
 const GetProductById = require('../queries/GetProductById');
 const GetProductByName = require('../queries/GetProductByName');
+const UpdateProductFacturamaId = require('../queries/UpdateProductFacturamaId');
 const FacturamaClient = require('./FacturamaClient');
+const { logCaughtError } = require('./logCaughtError');
 
 const MORAL_FACTOR = 0.9875; // 1.25% menos
 const CURRENCY = 'mxn';
@@ -164,6 +166,78 @@ class ProductsManager {
     } catch (error) {
       return { success: false, error: error.message };
     }
+  }
+
+  /**
+   * Si el producto no tiene facturama_product_id, intenta crearlo en Facturama y actualizar DB.
+   * No lanza: fallo → log y continúa (no bloquea cobros).
+   */
+  static async ensureFacturamaProduct(product, db) {
+    if (!product?.id) {
+      return { success: true, skipped: true, product };
+    }
+    if (product.facturama_product_id) {
+      return { success: true, skipped: true, product };
+    }
+
+    const parsed = {
+      name: product.name,
+      description: product.description,
+      monthly_amount: Number(product.monthly_amount),
+      facturama_code_prod_serv:
+        product.facturama_code_prod_serv ||
+        process.env.FACTURAMA_PRODUCT_CODE ||
+        '81112100',
+      facturama_unit_code: product.facturama_unit_code || process.env.FACTURAMA_UNIT_CODE || 'E48',
+      facturama_unit: product.facturama_unit || 'Servicio',
+    };
+
+    try {
+      const created = await ProductsManager.createInFacturama(
+        parsed,
+        product.stripe_product_id
+      );
+      if (!created.success) {
+        console.warn(
+          `[stripe][products] ensureFacturama pending id=${product.id}: ${created.error}`
+        );
+        return { success: false, error: created.error, product };
+      }
+
+      const updated = await db.query(UpdateProductFacturamaId, [
+        product.id,
+        created.facturama_product_id,
+        created.facturama_code_prod_serv,
+        created.facturama_unit_code,
+        created.facturama_unit,
+      ]);
+      const row = updated.rows[0] || {
+        ...product,
+        facturama_product_id: created.facturama_product_id,
+        facturama_code_prod_serv: created.facturama_code_prod_serv,
+        facturama_unit_code: created.facturama_unit_code,
+        facturama_unit: created.facturama_unit,
+      };
+      console.log(
+        `[stripe][products] ensureFacturama ok id=${product.id} fac=${created.facturama_product_id}`
+      );
+      return { success: true, synced: true, product: row };
+    } catch (error) {
+      logCaughtError('ProductsManager.ensureFacturamaProduct', error);
+      return { success: false, error: error.message, product };
+    }
+  }
+
+  static async ensureFacturamaProducts(products, db) {
+    if (!Array.isArray(products) || products.length === 0) {
+      return products || [];
+    }
+    const out = [];
+    for (const product of products) {
+      const ensured = await ProductsManager.ensureFacturamaProduct(product, db);
+      out.push(ensured.product || product);
+    }
+    return out;
   }
 
   static async list(db, activeFilter = null) {

@@ -170,17 +170,20 @@ class FiscalInfoManager {
       }
       return { status: 'valid', messages: ['Validación SAT correcta.'] };
     }
-    if (sat.status === 'error') {
-      let message = 'No se pudo validar con Facturama.';
+    if (sat.status === 'error' || sat.status === 'pending') {
+      let message =
+        sat.status === 'pending'
+          ? 'Validación SAT pendiente (Facturama no disponible).'
+          : 'No se pudo validar con Facturama.';
       try {
         const detail = JSON.parse(sat.detail || '{}');
-        if (detail.error) {
+        if (detail.error && sat.status === 'error') {
           message = `No se pudo validar con Facturama: ${detail.error}`;
         }
       } catch {
         // ignore parse errors
       }
-      return { status: 'error', messages: [message] };
+      return { status: sat.status === 'pending' ? 'pending' : 'error', messages: [message] };
     }
 
     const messages = [];
@@ -225,16 +228,21 @@ class FiscalInfoManager {
       });
       let sat = FiscalInfoManager.interpretSatValidation(validated);
       sat = FiscalInfoManager.maybeRelaxSandboxSat(sat, validated);
-      const sat_validation = FiscalInfoManager.describeSatValidation(sat);
 
       if (sat.status === 'invalid') {
         return {
           success: false,
           error: 'SAT_VALIDATION_FAILED',
           status: 400,
-          sat_validation,
+          sat_validation: FiscalInfoManager.describeSatValidation(sat),
         };
       }
+
+      // Facturama caído / error de transporte: guardar como pending, no desactivar.
+      if (sat.status === 'error') {
+        sat = { status: 'pending', detail: sat.detail };
+      }
+      const sat_validation = FiscalInfoManager.describeSatValidation(sat);
 
       const params = [
         parsed.rfc,
@@ -264,11 +272,6 @@ class FiscalInfoManager {
         sat.detail,
       ]);
       row = satUpdated.rows[0] || row;
-
-      if (sat.status === 'error' && existing.fiscal?.active) {
-        const deactivated = await db.query(SetFiscalActive, [row.id, false]);
-        row = deactivated.rows[0] || { ...row, active: false };
-      }
 
       return { success: true, fiscal: row, sat_validation };
     } catch (error) {
@@ -320,6 +323,9 @@ class FiscalInfoManager {
     });
     let sat = FiscalInfoManager.interpretSatValidation(validated);
     sat = FiscalInfoManager.maybeRelaxSandboxSat(sat, validated);
+    if (sat.status === 'error') {
+      sat = { status: 'pending', detail: sat.detail };
+    }
     try {
       const updated = await db.query(UpdateFiscalSatValidation, [
         fiscal.id,
@@ -389,9 +395,8 @@ class FiscalInfoManager {
     const fiscal_active = !!fiscal.active;
     const sat_validation_status = fiscal.sat_validation_status || 'pending';
     const persona_moral = !!fiscal.persona_moral;
-    const sat_valid = sat_validation_status === 'valid';
-    const variant =
-      fiscal_active && sat_valid && persona_moral ? 'moral' : 'full';
+    // Precio moral basta con persona_moral registrada (sin exigir sat_valid ni active).
+    const variant = persona_moral ? 'moral' : 'full';
 
     return {
       success: true,

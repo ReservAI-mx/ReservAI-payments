@@ -1,10 +1,17 @@
 const ProductsManager = require('../../utils/ProductsManager');
+const FacturamaClient = require('../../utils/FacturamaClient');
+
+jest.mock('../../utils/FacturamaClient');
+jest.mock('../../utils/logCaughtError', () => ({
+  logCaughtError: jest.fn(),
+}));
 
 describe('ProductsManager', () => {
   const db = { query: jest.fn() };
 
   beforeEach(() => {
     db.query.mockReset();
+    FacturamaClient.createProduct.mockReset();
   });
 
   it('validateCreateInput rejects bad amounts', () => {
@@ -74,5 +81,56 @@ describe('ProductsManager', () => {
     db.query.mockResolvedValueOnce({ rows: [{ id: 'p1', active: false }] });
     const updated = await ProductsManager.setActive('p1', false, db);
     expect(updated.product.active).toBe(false);
+  });
+
+  it('ensureFacturamaProduct syncs pending product', async () => {
+    FacturamaClient.createProduct.mockResolvedValue({
+      success: true,
+      data: { Id: 'fac_new' },
+    });
+    db.query.mockResolvedValueOnce({
+      rows: [{ id: 'p1', facturama_product_id: 'fac_new' }],
+    });
+    const product = {
+      id: 'p1',
+      name: 'Plan',
+      description: 'D',
+      monthly_amount: 100,
+      stripe_product_id: 'prod_1',
+      facturama_product_id: null,
+      facturama_code_prod_serv: '81112100',
+      facturama_unit_code: 'E48',
+      facturama_unit: 'Servicio',
+    };
+    const r = await ProductsManager.ensureFacturamaProduct(product, db);
+    expect(r.success).toBe(true);
+    expect(r.synced).toBe(true);
+    expect(r.product.facturama_product_id).toBe('fac_new');
+    expect(FacturamaClient.createProduct).toHaveBeenCalled();
+  });
+
+  it('ensureFacturamaProduct does not throw when Facturama fails', async () => {
+    FacturamaClient.createProduct.mockResolvedValue({
+      success: false,
+      error: '401',
+    });
+    const product = {
+      id: 'p1',
+      name: 'Plan',
+      description: 'D',
+      monthly_amount: 100,
+      stripe_product_id: 'prod_1',
+      facturama_product_id: null,
+    };
+    const r = await ProductsManager.ensureFacturamaProduct(product, db);
+    expect(r.success).toBe(false);
+    expect(r.product.facturama_product_id).toBeFalsy();
+  });
+
+  it('ensureFacturamaProduct skips when already synced', async () => {
+    const product = { id: 'p1', facturama_product_id: 'fac_1' };
+    const r = await ProductsManager.ensureFacturamaProduct(product, db);
+    expect(r.skipped).toBe(true);
+    expect(FacturamaClient.createProduct).not.toHaveBeenCalled();
   });
 });

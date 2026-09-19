@@ -1,6 +1,7 @@
 const SubscriptionManager = require('../utils/SubscriptionManager');
 const CustomersManager = require('../utils/CustomersManager');
 const TechnicalInfoManager = require('../utils/TechnicalInfoManager');
+const ProductsManager = require('../utils/ProductsManager');
 const getStripeInstance = require('../data/StripeInstanceGetter');
 const { connectDB } = require('../data/connectDB');
 const { captureStripeFailure } = require('../utils/captureOpsError');
@@ -39,6 +40,14 @@ const ActivateSubscription = async (req, res) => {
     }
     if (lookup.setup.status !== 'ready_for_subscription' || lookup.setup.stripe_subscription_id) {
         return res.status(409).json({ error: 'SETUP_NOT_READY' });
+    }
+
+    const productLookup = await ProductsManager.findForCheckout(
+        lookup.setup.planned_plan,
+        db
+    );
+    if (productLookup.success && productLookup.product) {
+        await ProductsManager.ensureFacturamaProduct(productLookup.product, db);
     }
 
     let stripe = null;

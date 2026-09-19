@@ -24,6 +24,7 @@ function mockHappyPathDeps() {
     success: true,
     products: [{ id: 'p1', name: 'Básico', stripe_price_id_setup: 'price_s' }],
   });
+  ProductsManager.ensureFacturamaProducts.mockImplementation(async (products) => products);
   FiscalInfoManager.resolvePriceVariant.mockResolvedValue({
     success: true,
     variant: 'full',

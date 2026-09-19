@@ -432,8 +432,9 @@ class InvoiceManager {
     if (!stamped.success) {
       return {
         success: false,
-        error: stamped.error || 'FACTURAMA_STAMP_FAILED',
-        status: 502,
+        error: 'FACTURAMA_UNAVAILABLE',
+        detail: stamped.error || 'FACTURAMA_STAMP_FAILED',
+        status: 503,
       };
     }
 
@@ -445,7 +446,12 @@ class InvoiceManager {
     const folio = stamped.data.Folio != null ? String(stamped.data.Folio) : null;
 
     if (!facturamaId) {
-      return { success: false, error: 'FACTURAMA_MISSING_ID', status: 502 };
+      return {
+        success: false,
+        error: 'FACTURAMA_UNAVAILABLE',
+        detail: 'FACTURAMA_MISSING_ID',
+        status: 503,
+      };
     }
 
     const [pdfRes, xmlRes] = await Promise.all([

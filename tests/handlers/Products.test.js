@@ -61,7 +61,7 @@ describe('products handlers', () => {
     expect(ProductsManager.createInFacturama).toHaveBeenCalled();
   });
 
-  it('CreateProduct fails if Facturama fails', async () => {
+  it('CreateProduct saves with facturama_pending when Facturama fails', async () => {
     ProductsManager.validateCreateInput.mockReturnValue({
       name: 'Plan',
       description: 'D',
@@ -84,10 +84,18 @@ describe('products handlers', () => {
       success: false,
       error: 'Facturama boom',
     });
+    ProductsManager.insertInDB.mockResolvedValue({
+      success: true,
+      product: { id: 'uuid-1', name: 'Plan', facturama_product_id: null },
+    });
     const res = createMockRes();
     await CreateProduct(createMockReq({ body: { name: 'Plan' } }), res);
-    expect(res.status).toHaveBeenCalledWith(502);
-    expect(ProductsManager.insertInDB).not.toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(201);
+    expect(res._json.facturama_pending).toBe(true);
+    expect(ProductsManager.insertInDB).toHaveBeenCalledWith(
+      expect.objectContaining({ facturama_product_id: null, stripe_product_id: 'prod_1' }),
+      expect.anything()
+    );
   });
 
   it('ListProducts returns rows', async () => {

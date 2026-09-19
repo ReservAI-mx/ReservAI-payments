@@ -52,6 +52,8 @@ const GetMyPaymentLinks = async (req, res) => {
         return res.status(503).json({ error: 'NO_ACTIVE_PRODUCTS' });
     }
 
+    listed.products = await ProductsManager.ensureFacturamaProducts(listed.products, db);
+
     const priceCtx = await FiscalInfoManager.resolvePriceVariant(account.id, db);
     if (!priceCtx.success) {
         captureStripeFailure(priceCtx.error || 'resolvePriceVariant failed', {

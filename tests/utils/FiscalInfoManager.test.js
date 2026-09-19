@@ -262,15 +262,15 @@ describe('FiscalInfoManager', () => {
     expect(r.error).toBe('SAT_VALIDATION_REQUIRED');
   });
 
-  test('resolvePriceVariant uses moral only when active+valid+moral', async () => {
+  test('resolvePriceVariant uses moral when persona_moral even if sat pending', async () => {
     const db = {
       query: jest.fn(async () => ({
         rows: [{
           id: 'f1',
           account_id: 'a1',
-          active: true,
+          active: false,
           persona_moral: true,
-          sat_validation_status: 'valid',
+          sat_validation_status: 'pending',
         }],
       })),
     };
@@ -282,14 +282,14 @@ describe('FiscalInfoManager', () => {
     expect(r.variant).toBe('moral');
   });
 
-  test('resolvePriceVariant falls back to full otherwise', async () => {
+  test('resolvePriceVariant falls back to full when not persona_moral', async () => {
     const db = {
       query: jest.fn(async () => ({
         rows: [{
           id: 'f1',
           active: true,
-          persona_moral: true,
-          sat_validation_status: 'pending',
+          persona_moral: false,
+          sat_validation_status: 'valid',
         }],
       })),
     };
@@ -298,6 +298,48 @@ describe('FiscalInfoManager', () => {
       db
     );
     expect(r.variant).toBe('full');
+  });
+
+  test('upsert persists pending and does not deactivate when Facturama errors', async () => {
+    FacturamaClient.validateReceiver.mockResolvedValue({
+      success: false,
+      error: 'timeout',
+      status: 503,
+    });
+    const existing = {
+      id: 'f1',
+      account_id: 'a1',
+      active: true,
+      rfc: 'EKU9003173C9',
+      sat_validation_status: 'valid',
+    };
+    const db = {
+      query: jest
+        .fn()
+        .mockResolvedValueOnce({ rows: [existing] }) // getByAccountId
+        .mockResolvedValueOnce({ rows: [{ ...existing }] }) // UpdateFiscalInfo
+        .mockResolvedValueOnce({
+          rows: [{ ...existing, sat_validation_status: 'pending' }],
+        }), // UpdateFiscalSatValidation
+    };
+    const r = await FiscalInfoManager.upsert(
+      'a1',
+      {
+        confirmed: true,
+        rfc: 'EKU9003173C9',
+        razon_social: 'ESCUELA KEMPER URGATE',
+        codigo_postal: '26015',
+        regimen_fiscal: '601',
+        persona_moral: true,
+      },
+      {},
+      db
+    );
+    expect(r.success).toBe(true);
+    expect(r.fiscal.sat_validation_status).toBe('pending');
+    expect(r.sat_validation.status).toBe('pending');
+    // get + update fiscal + sat; no SetFiscalActive
+    expect(db.query).toHaveBeenCalledTimes(3);
   });
 
   test('pickSetupPriceId chooses moral price', () => {
