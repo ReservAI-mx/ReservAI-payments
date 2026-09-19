@@ -1,4 +1,5 @@
 function createMockRes() {
+  const listeners = {};
   const res = {
     statusCode: 200,
     headersSent: false,
@@ -8,6 +9,14 @@ function createMockRes() {
     clearCookie: jest.fn(),
     setHeader: jest.fn(),
     getHeader: jest.fn(),
+    on: jest.fn((event, cb) => {
+      if (!listeners[event]) listeners[event] = [];
+      listeners[event].push(cb);
+      return res;
+    }),
+    emit: (event, ...args) => {
+      for (const cb of listeners[event] || []) cb(...args);
+    },
   };
   res.status = jest.fn((code) => {
     res.statusCode = code;
@@ -16,11 +25,13 @@ function createMockRes() {
   res.json = jest.fn((payload) => {
     res._json = payload;
     res.headersSent = true;
+    res.emit('finish');
     return res;
   });
   res.send = jest.fn((body) => {
     res._body = body;
     res.headersSent = true;
+    res.emit('finish');
     return res;
   });
   return res;

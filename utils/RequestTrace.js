@@ -23,6 +23,19 @@ function requestTraceMiddleware(req, res, next) {
         clientIp: getClientIp(req),
         userAgent: req.get('User-Agent') ? String(req.get('User-Agent')).slice(0, 256) : null,
     };
+    const path = typeof req.originalUrl === 'string' ? req.originalUrl.split('?')[0] : req.path || '';
+    console.log(`[stripe][http] → ${req.method} ${path}`);
+    res.on('finish', () => {
+        const ms = Date.now() - req.passRequestTrace.startedAt;
+        const line = `[stripe][http] ← ${req.method} ${path} ${res.statusCode} ${ms}ms`;
+        if (res.statusCode >= 500) {
+            console.error(line);
+        } else if (res.statusCode >= 400) {
+            console.warn(line);
+        } else {
+            console.log(line);
+        }
+    });
     next();
 }
 

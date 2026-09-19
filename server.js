@@ -105,6 +105,8 @@ function createApp(options = {}) {
   app.use(helmet(helmetOptions));
   app.use(cors(corsOptions));
   app.set('trust proxy', 1);
+  // Log de entrada/salida lo antes posible (incluye webhooks y 403 de proxy).
+  app.use(requestTraceMiddleware);
   app.use(VerifyProxySecret);
 
   app.use('/webhooks', express.raw({ type: 'application/json' }), VerifyStripeEvent, webhookRouter);
@@ -113,8 +115,6 @@ function createApp(options = {}) {
   app.use(express.json({ limit: '10mb' }));
   app.use(express.urlencoded({ extended: true, limit: '10mb' }));
   app.use(cookieParser());
-
-  app.use(requestTraceMiddleware);
   if (applyLimiter) {
     app.use(rateLimit(limiterOptions));
   }

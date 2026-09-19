@@ -38,16 +38,26 @@ describe('OpsJobManager.markFailed', () => {
 });
 
 describe('captureOpsError', () => {
+  let errSpy;
+
   beforeEach(() => {
     Sentry.captureException.mockClear();
     Sentry.withScope.mockClear();
+    errSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
   });
 
-  it('returns Error instance', () => {
-    const err = captureOpsError('boom', { job_id: 'j1' });
+  afterEach(() => {
+    errSpy.mockRestore();
+  });
+
+  it('returns Error instance and logs to console', () => {
+    const err = captureOpsError('boom', { job_id: 'j1', phase: 'ops.test' });
     expect(err).toBeInstanceOf(Error);
     expect(err.message).toBe('boom');
     expect(Sentry.captureException).toHaveBeenCalled();
+    expect(errSpy).toHaveBeenCalled();
+    expect(String(errSpy.mock.calls[0][0])).toContain('[stripe][ops.test]');
+    expect(String(errSpy.mock.calls[0][0])).toContain('boom');
   });
 
   it('captureStripeFailure tags webhook area and phase', () => {
@@ -57,6 +67,7 @@ describe('captureOpsError', () => {
       event_type: 'checkout.session.completed',
     });
     expect(Sentry.captureException).toHaveBeenCalled();
+    expect(errSpy).toHaveBeenCalled();
   });
 
   it('flushSentry calls Sentry.flush', async () => {

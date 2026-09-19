@@ -14,19 +14,24 @@ describe('SentryHttp5xxCapture', () => {
     process.env.SENTRY_DSN = prevDsn;
   });
 
-  it('skips hook when SENTRY_DSN empty', () => {
+  it('logs 500 even when SENTRY_DSN empty (no Sentry call)', () => {
     process.env.SENTRY_DSN = '';
-    const req = createMockReq();
+    const errSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    const req = createMockReq({ method: 'GET', originalUrl: '/api/billing/x' });
     const res = createMockRes();
-    const sendBefore = res.send;
     const next = createMockNext();
     sentryHttp5xxCapture(req, res, next);
-    expect(res.send).toBe(sendBefore);
+    res.statusCode = 500;
+    res.send(JSON.stringify({ error: 'fail' }));
+    expect(errSpy).toHaveBeenCalled();
+    expect(Sentry.captureMessage).not.toHaveBeenCalled();
     expect(next).toHaveBeenCalled();
+    errSpy.mockRestore();
   });
 
-  it('captures message on 500 response', () => {
+  it('captures message on 500 response when DSN set', () => {
     process.env.SENTRY_DSN = 'https://example@sentry.io/1';
+    const errSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
     const req = createMockReq();
     const res = createMockRes();
     const next = createMockNext();
@@ -34,6 +39,8 @@ describe('SentryHttp5xxCapture', () => {
     res.statusCode = 500;
     res.send(JSON.stringify({ error: 'fail' }));
     expect(Sentry.captureMessage).toHaveBeenCalled();
+    expect(errSpy).toHaveBeenCalled();
     expect(next).toHaveBeenCalled();
+    errSpy.mockRestore();
   });
 });
