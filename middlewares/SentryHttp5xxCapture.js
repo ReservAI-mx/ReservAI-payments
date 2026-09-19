@@ -6,37 +6,56 @@ function sentryDsnConfigured() {
   return typeof dsn === 'string' && dsn.trim().length > 0;
 }
 
+function extractErrorBody(body) {
+  if (body == null) return { detail: '', raw: '' };
+  let parsed = body;
+  if (typeof body === 'string') {
+    try {
+      parsed = JSON.parse(body);
+    } catch {
+      return { detail: body.slice(0, 500), raw: body.slice(0, 800) };
+    }
+  }
+  if (typeof parsed !== 'object' || parsed === null) {
+    return { detail: String(body).slice(0, 500), raw: String(body).slice(0, 800) };
+  }
+  const detail =
+    (typeof parsed.error === 'string' && parsed.error) ||
+    (typeof parsed.message === 'string' && parsed.message) ||
+    '';
+  let raw = '';
+  try {
+    raw = JSON.stringify(parsed).slice(0, 800);
+  } catch {
+    raw = detail;
+  }
+  return { detail: String(detail).slice(0, 500), raw };
+}
+
 /**
- * Loggea respuestas HTTP >= 500 y las manda a Sentry (si hay DSN).
- * Parche por petición sobre res.send (res.json en Express hace stringify + send).
- * Evita duplicar con el error handler del SDK vía res.sentry y _sentry5xxReported.
+ * Loggea respuestas HTTP de error (API y webhooks) y manda >=500 a Sentry si hay DSN.
+ * Cubre handlers que no llaman captureStripeFailure.
  */
 function sentryHttp5xxCapture(req, res, next) {
   const origSend = res.send.bind(res);
   res.send = function sentrySendWrapper(body) {
-    if (!res._sentry5xxReported && res.statusCode >= 500 && !res.sentry) {
+    if (!res._sentry5xxReported && res.statusCode >= 400 && !res.sentry) {
       res._sentry5xxReported = true;
       try {
-        let detail = '';
-        if (body != null) {
-          if (typeof body === 'string') {
-            try {
-              const parsed = JSON.parse(body);
-              if (parsed && typeof parsed.error === 'string') {
-                detail = parsed.error.slice(0, 500);
-              }
-            } catch {
-              detail = body.slice(0, 500);
-            }
-          } else if (typeof body === 'object' && typeof body.error === 'string') {
-            detail = body.error.slice(0, 500);
-          }
+        const { detail, raw } = extractErrorBody(body);
+        const path =
+          typeof req.originalUrl === 'string' ? req.originalUrl.split('?')[0] : req.path || '';
+        const msg = detail
+          ? `HTTP ${res.statusCode}: ${detail}`
+          : `HTTP ${res.statusCode}`;
+        const line = `[stripe][http] ${req.method} ${path} → ${msg}${raw && raw !== detail ? ` body=${raw}` : ''}`;
+        if (res.statusCode >= 500) {
+          console.error(line);
+        } else {
+          console.warn(line);
         }
-        const path = typeof req.originalUrl === 'string' ? req.originalUrl.split('?')[0] : req.path || '';
-        const msg = detail ? `HTTP ${res.statusCode}: ${detail}` : `HTTP ${res.statusCode}`;
-        console.error(`[stripe][http] ${req.method} ${path} → ${msg}`);
 
-        if (sentryDsnConfigured()) {
+        if (res.statusCode >= 500 && sentryDsnConfigured()) {
           Sentry.withScope((scope) => {
             scope.setTag('error_source', 'http_response');
             scope.setTag('http_status', String(res.statusCode));

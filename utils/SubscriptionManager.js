@@ -6,6 +6,7 @@ const UpdateSubscriptionOnCancellation = require('../queries/UpdateSubscriptionO
 const Subscription = require('../models/subscription');
 const GetSubscriptionsSummaries = require('../queries/GetSubscriptionsSummaries');
 const GetCancelAtPeriodEnd = require('../queries/GetCancelAtPeriodEnd');
+const { logCaughtError } = require('./logCaughtError');
 
 class SubscriptionManager {
 
@@ -20,6 +21,7 @@ class SubscriptionManager {
                 cancel_at_period_end: Boolean(result.rows[0]?.cancel_at_period_end),
             };
         } catch (error) {
+            logCaughtError('SubscriptionManager', error);
             return {
                 success: false,
                 cancel_at_period_end: false,
@@ -42,6 +44,7 @@ class SubscriptionManager {
                 subscriptions: result.rows
             }
         } catch (error) {
+            logCaughtError('SubscriptionManager', error);
             return {
                 success: false,
                 message: 'Error retrieving subscriptions summaries',
@@ -71,6 +74,7 @@ class SubscriptionManager {
                 subscription: result.rows[0]
             }
         } catch (error) {
+            logCaughtError('SubscriptionManager', error);
             return {
                 success: false,
                 message: 'Error creating subscription',
@@ -99,6 +103,7 @@ class SubscriptionManager {
                 subscription: result.rows[0]
             }
         } catch (error) {
+            logCaughtError('SubscriptionManager', error);
             return {
                 success: false,
                 message: 'Error updating subscription',
@@ -121,6 +126,7 @@ class SubscriptionManager {
                 subscription: result.rows[0]
             }
         } catch (error) {
+            logCaughtError('SubscriptionManager', error);
             return {
                 success: false,
                 message: 'Error updating subscription on payment success',
@@ -142,6 +148,7 @@ class SubscriptionManager {
                 subscription: result.rows[0]
             }
         } catch (error) {
+            logCaughtError('SubscriptionManager', error);
             return {
                 success: false,
                 message: 'Error updating subscription on payment failed',
@@ -162,6 +169,7 @@ class SubscriptionManager {
                 subscription: result.rows[0]
             }
         } catch (error) {
+            logCaughtError('SubscriptionManager', error);
             return {
                 success: false,
                 message: 'Error updating subscription on cancellation',
@@ -263,6 +271,7 @@ class SubscriptionManager {
                 }
             }
         } catch (error) {
+            logCaughtError('SubscriptionManager', error);
             return {
                 success: false,
                 message: 'Error creating checkout sessions',
@@ -360,6 +369,7 @@ class SubscriptionManager {
                 }))
             }
         } catch (error) {
+            logCaughtError('SubscriptionManager', error);
             return {
                 success: false,
                 message: 'Error creating checkout sessions',
@@ -467,6 +477,7 @@ class SubscriptionManager {
                 fiscal: fiscalFlags,
             }
         } catch (error) {
+            logCaughtError('SubscriptionManager', error);
             return {
                 success: false,
                 message: 'Error creating checkout session',

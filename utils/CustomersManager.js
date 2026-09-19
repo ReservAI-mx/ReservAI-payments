@@ -1,6 +1,7 @@
 const CustomerExistByID = require('../queries/CustomerExistByID');
 const CreateCustomerInDB = require('../queries/CreateCustomerInDB.js');
 const GetCustomersEmailAndName = require('../queries/GetCustomersEmailAndName.js');
+const { logCaughtError } = require('./logCaughtError');
 
 class CustomersManager {
     static async customerExistByID(account_id, db) {
@@ -12,6 +13,7 @@ class CustomersManager {
                 exists: result.rows[0] ? true : false
             }
         } catch (error) {
+            logCaughtError('CustomersManager.customerExistByID', error);
             return {
                 error: error.message,
                 success: false
@@ -37,6 +39,7 @@ class CustomersManager {
             }
         }
         catch (error) {
+            logCaughtError('CustomersManager.createCustomerInStripe', error);
             return {
                 error: error.message,
                 success: false
@@ -53,6 +56,7 @@ class CustomersManager {
                 customer: result.rows[0]
             }
         } catch (error) {
+            logCaughtError('CustomersManager.createCustomerInDB', error);
             return {
                 success: false,
                 message: 'Error creating customer',
@@ -73,6 +77,7 @@ class CustomersManager {
                 session: session
             }
         } catch (error) {
+            logCaughtError('CustomersManager.createPortalSession', error);
             return {
                 success: false,
                 message: 'Error creating portal session',
@@ -91,6 +96,7 @@ class CustomersManager {
             }
         } 
         catch (error) {
+            logCaughtError('CustomersManager.getCustomersEmailAndName', error);
             return {
                 success: false,
                 message: 'Error getting customers email and name',

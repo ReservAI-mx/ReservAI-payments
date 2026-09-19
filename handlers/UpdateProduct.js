@@ -1,5 +1,6 @@
 const ProductsManager = require('../utils/ProductsManager');
 const { connectDB } = require('../data/connectDB');
+const { captureStripeFailure } = require('../utils/captureOpsError');
 
 const UpdateProduct = async (req, res) => {
   const id = req.params?.id ? String(req.params.id).trim() : '';
@@ -15,6 +16,7 @@ const UpdateProduct = async (req, res) => {
   try {
     db = await connectDB();
   } catch (error) {
+    captureStripeFailure(error, { phase: 'billing.products.update.connectDB' });
     return res.status(500).json({ error: 'Internal server error' });
   }
 
@@ -23,6 +25,9 @@ const UpdateProduct = async (req, res) => {
     return res.status(404).json({ error: 'Producto no encontrado' });
   }
   if (!result.success) {
+    captureStripeFailure(result.error || 'setActive failed', {
+      phase: 'billing.products.update',
+    });
     return res.status(500).json({ error: result.error || 'Error actualizando producto' });
   }
 

@@ -12,6 +12,7 @@ describe('SentryHttp5xxCapture', () => {
 
   afterEach(() => {
     process.env.SENTRY_DSN = prevDsn;
+    Sentry.captureMessage.mockClear();
   });
 
   it('logs 500 even when SENTRY_DSN empty (no Sentry call)', () => {
@@ -42,5 +43,20 @@ describe('SentryHttp5xxCapture', () => {
     expect(errSpy).toHaveBeenCalled();
     expect(next).toHaveBeenCalled();
     errSpy.mockRestore();
+  });
+
+  it('logs 4xx API errors with body (non-webhook)', () => {
+    process.env.SENTRY_DSN = '';
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    const req = createMockReq({ method: 'GET', originalUrl: '/api/billing/links' });
+    const res = createMockRes();
+    const next = createMockNext();
+    sentryHttp5xxCapture(req, res, next);
+    res.statusCode = 409;
+    res.send(JSON.stringify({ error: 'SUBDOMAIN_TAKEN' }));
+    expect(warnSpy).toHaveBeenCalled();
+    expect(String(warnSpy.mock.calls[0][0])).toContain('SUBDOMAIN_TAKEN');
+    expect(Sentry.captureMessage).not.toHaveBeenCalled();
+    warnSpy.mockRestore();
   });
 });
