@@ -2,6 +2,20 @@ const Sentry = require('../instrument-sentry');
 
 function captureOpsError(err, context = {}) {
   const error = err instanceof Error ? err : new Error(String(err));
+  const phase = context.phase || context.area || 'ops';
+  const extras = [];
+  if (context.event_type) extras.push(`event=${context.event_type}`);
+  if (context.job_id) extras.push(`job=${context.job_id}`);
+  if (context.action) extras.push(`action=${context.action}`);
+  if (context.technical_info_id) extras.push(`ti=${context.technical_info_id}`);
+  if (context.subdomain) extras.push(`sub=${context.subdomain}`);
+  if (error.type) extras.push(`stripe_type=${error.type}`);
+  if (error.code) extras.push(`code=${error.code}`);
+  const suffix = extras.length ? ` (${extras.join(' ')})` : '';
+  console.error(`[stripe][${phase}] ${error.message}${suffix}`);
+  if (error.stack) {
+    console.error(error.stack);
+  }
   try {
     Sentry.withScope((scope) => {
       scope.setTag('area', String(context.area || 'ops'));

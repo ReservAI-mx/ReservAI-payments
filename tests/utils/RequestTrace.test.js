@@ -6,13 +6,21 @@ const {
 const { createMockReq, createMockRes, createMockNext } = require('../helpers/mockReqRes');
 
 describe('RequestTrace', () => {
-  it('requestTraceMiddleware initializes trace', () => {
-    const req = createMockReq();
+  it('requestTraceMiddleware initializes trace and logs', () => {
+    const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+    const req = createMockReq({ method: 'GET', originalUrl: '/api/billing/health' });
     const next = createMockNext();
-    requestTraceMiddleware(req, createMockRes(), next);
+    const res = createMockRes();
+    requestTraceMiddleware(req, res, next);
     expect(req.passRequestTrace.startedAt).toBeDefined();
     expect(Array.isArray(req.passRequestTrace.steps)).toBe(true);
     expect(next).toHaveBeenCalled();
+    expect(logSpy).toHaveBeenCalled();
+    expect(String(logSpy.mock.calls[0][0])).toContain('[stripe][http] → GET /api/billing/health');
+    res.statusCode = 200;
+    res.emit('finish');
+    expect(logSpy.mock.calls.some((c) => String(c[0]).includes('←'))).toBe(true);
+    logSpy.mockRestore();
   });
 
   it('addRequestTraceStep redacts sensitive keys', () => {
