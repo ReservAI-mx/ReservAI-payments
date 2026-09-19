@@ -1,6 +1,20 @@
 class FacturamaClient {
   static baseUrl() {
-    return (process.env.FACTURAMA_BASE_URL || 'https://apisandbox.facturama.mx').replace(/\/$/, '');
+    return FacturamaClient.stripEnv(process.env.FACTURAMA_BASE_URL).replace(/\/$/, '')
+      || 'https://apisandbox.facturama.mx';
+  }
+
+  /** Quita comillas/espacios que Fly secrets o .env a menudo dejan pegados. */
+  static stripEnv(value) {
+    if (value == null) return '';
+    let s = String(value).trim();
+    if (
+      (s.startsWith('"') && s.endsWith('"')) ||
+      (s.startsWith("'") && s.endsWith("'"))
+    ) {
+      s = s.slice(1, -1).trim();
+    }
+    return s;
   }
 
   /** Facturama sandbox no consulta el SAT real para receptores arbitrarios. */
@@ -9,13 +23,34 @@ class FacturamaClient {
   }
 
   static authHeader() {
-    const user = process.env.FACTURAMA_USER;
-    const password = process.env.FACTURAMA_PASSWORD;
+    const user = FacturamaClient.stripEnv(process.env.FACTURAMA_USER);
+    const password = FacturamaClient.stripEnv(process.env.FACTURAMA_PASSWORD);
     if (!user || !password) {
       throw new Error('FACTURAMA_USER or FACTURAMA_PASSWORD not configured');
     }
-    const token = Buffer.from(`${user}:${password}`).toString('base64');
+    const token = Buffer.from(`${user}:${password}`, 'utf8').toString('base64');
     return `Basic ${token}`;
+  }
+
+  /** Diagnóstico sin filtrar secretos (útil ante HTTP 401). */
+  static authDebugInfo() {
+    const user = FacturamaClient.stripEnv(process.env.FACTURAMA_USER);
+    const password = FacturamaClient.stripEnv(process.env.FACTURAMA_PASSWORD);
+    const rawUser = process.env.FACTURAMA_USER == null ? '' : String(process.env.FACTURAMA_USER);
+    const rawPass = process.env.FACTURAMA_PASSWORD == null ? '' : String(process.env.FACTURAMA_PASSWORD);
+    return {
+      baseUrl: FacturamaClient.baseUrl(),
+      sandbox: FacturamaClient.isSandbox(),
+      userLen: user.length,
+      userHasWrappedQuotes:
+        (rawUser.trim().startsWith('"') && rawUser.trim().endsWith('"')) ||
+        (rawUser.trim().startsWith("'") && rawUser.trim().endsWith("'")),
+      passLen: password.length,
+      passHasWrappedQuotes:
+        (rawPass.trim().startsWith('"') && rawPass.trim().endsWith('"')) ||
+        (rawPass.trim().startsWith("'") && rawPass.trim().endsWith("'")),
+      passHasWhitespace: /^\s|\s$/.test(rawPass),
+    };
   }
 
   /** Mensaje útil: Facturama a veces responde {} vacío en 4xx. */
@@ -27,7 +62,11 @@ class FacturamaClient {
       (typeof data?.ExceptionMessage === 'string' && data.ExceptionMessage) ||
       (data?.ModelState ? JSON.stringify(data.ModelState) : null) ||
       (Array.isArray(data) ? JSON.stringify(data) : null) ||
-      (keys.length === 0 ? 'empty JSON body (revisa auth, URL o payload)' : null);
+      (keys.length === 0
+        ? status === 401
+          ? 'Unauthorized (user/pass incorrectos, expirados, o sandbox vs prod)'
+          : 'empty JSON body (revisa auth, URL o payload)'
+        : null);
     const body =
       data == null
         ? ''
@@ -147,6 +186,9 @@ class FacturamaClient {
       if (!response.ok) {
         const error = FacturamaClient.formatHttpError(data, response.status, path);
         console.error(`[facturama] createProduct failed: ${error}`);
+        if (response.status === 401) {
+          console.error('[facturama] auth debug:', JSON.stringify(FacturamaClient.authDebugInfo()));
+        }
         return {
           success: false,
           error,
