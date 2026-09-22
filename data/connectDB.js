@@ -136,8 +136,7 @@ class DatabaseConnection {
             }
 
             console.log('✅ Conexión a la base de datos establecida correctamente');
-            this.isConnected = true;
-            this.reconnectAttempts = 0;
+            this.markConnected();
 
             this.startConnectionCheck();
 
@@ -164,8 +163,7 @@ class DatabaseConnection {
 
         pool.on('connect', (client) => {
             console.log('✅ Nueva conexión establecida a la base de datos');
-            this.isConnected = true;
-            this.reconnectAttempts = 0;
+            this.markConnected();
 
             client.on('error', (err) => {
                 reportTransientDbError(err, 'pg_client');
@@ -212,6 +210,19 @@ class DatabaseConnection {
         }
     }
 
+    cancelScheduledReconnect() {
+        if (this.reconnectTimer) {
+            clearTimeout(this.reconnectTimer);
+            this.reconnectTimer = null;
+        }
+    }
+
+    markConnected() {
+        this.isConnected = true;
+        this.reconnectAttempts = 0;
+        this.cancelScheduledReconnect();
+    }
+
     scheduleReconnect() {
         if (this.isReconnecting || this.reconnectTimer) {
             return;
@@ -245,6 +256,7 @@ class DatabaseConnection {
 
     async runReconnect() {
         if (this.isReconnecting) return;
+        if (this.pool && this.isConnected) return;
         this.isReconnecting = true;
         try {
             await this.safeEndPool();
@@ -279,9 +291,8 @@ class DatabaseConnection {
                     await client.query('SELECT 1 as healthcheck');
                     if (!this.isConnected) {
                         console.log('✅ Conexión restaurada');
-                        this.isConnected = true;
-                        this.reconnectAttempts = 0;
                     }
+                    this.markConnected();
                 } finally {
                     client.release();
                 }
@@ -309,8 +320,7 @@ class DatabaseConnection {
                     await this.connect();
                 }
                 const result = await this._rawQuery(...args);
-                this.isConnected = true;
-                this.reconnectAttempts = 0;
+                this.markConnected();
                 return result;
             } catch (error) {
                 lastError = error;
@@ -430,15 +440,19 @@ const connectDB = async () => {
     }
     installProcessGuards();
 
-    if (!dbInstance.isConnected) {
+    if (!dbInstance.pool || !dbInstance.isConnected) {
         await dbInstance.connect();
+    }
+
+    if (!dbInstance.pool) {
+        throw new Error('No hay pool de conexiones');
     }
 
     return dbInstance.pool;
 };
 
 const getDB = async () => {
-    if (!dbInstance || !dbInstance.pool) {
+    if (!dbInstance || !dbInstance.pool || !dbInstance.isConnected) {
         console.log('🔄 No hay pool de conexiones, intentando conectar...');
         await connectDB();
     }
