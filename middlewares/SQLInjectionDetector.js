@@ -1,4 +1,4 @@
-const { addRequestTraceStep } = require('../utils/RequestTrace');
+const { addRequestTraceStep, logAction } = require('../utils/RequestTrace');
 
 /**
  * SQLInjectionDetector - Middleware para detectar intentos de inyección SQL
@@ -167,15 +167,7 @@ class SQLInjectionDetector {
                     const analysis = this.analyzeInput(bodyString);
 
                     if (!analysis.isSafe) {
-                        console.warn('🚨 SQL Injection attempt detected:', {
-                            ip: req.ip,
-                            userAgent: req.get('User-Agent'),
-                            url: req.originalUrl,
-                            method: req.method,
-                            threats: analysis.threats,
-                            suspiciousChars: analysis.suspiciousChars,
-                            timestamp: new Date().toISOString()
-                        });
+                        logAction(req, 'warning', 'SQLInjectionDetector', 'body');
 
                         return res.status(400).json({
                             error: 'Request contains potentially malicious content',
@@ -191,14 +183,7 @@ class SQLInjectionDetector {
                     const analysis = this.analyzeInput(queryString);
 
                     if (!analysis.isSafe) {
-                        console.warn('🚨 SQL Injection attempt in query params:', {
-                            ip: req.ip,
-                            userAgent: req.get('User-Agent'),
-                            url: req.originalUrl,
-                            method: req.method,
-                            threats: analysis.threats,
-                            timestamp: new Date().toISOString()
-                        });
+                        logAction(req, 'warning', 'SQLInjectionDetector', 'query');
 
                         return res.status(400).json({
                             error: 'Query parameters contain potentially malicious content',
@@ -215,13 +200,7 @@ class SQLInjectionDetector {
                     if (headerValue) {
                         const analysis = this.analyzeInput(headerValue);
                         if (!analysis.isSafe) {
-                            console.warn('🚨 SQL Injection attempt in headers:', {
-                                ip: req.ip,
-                                header: header,
-                                value: headerValue,
-                                threats: analysis.threats,
-                                timestamp: new Date().toISOString()
-                            });
+                            logAction(req, 'warning', 'SQLInjectionDetector', `header=${header}`);
 
                             return res.status(400).json({
                                 error: 'Headers contain potentially malicious content',
@@ -235,7 +214,7 @@ class SQLInjectionDetector {
                 addRequestTraceStep(req, 'SQLInjectionDetector', { ok: true });
                 next();
             } catch (error) {
-                console.error('❌ Error in SQL Injection Detector:', error);
+                logAction(req, 'error', 'SQLInjectionDetector', 'detector failed', error);
                 // En caso de error, permitir que continúe pero logear
                 next();
             }

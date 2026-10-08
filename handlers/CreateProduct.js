@@ -2,10 +2,12 @@ const ProductsManager = require('../utils/ProductsManager');
 const getStripeInstance = require('../data/StripeInstanceGetter');
 const { connectDB } = require('../data/connectDB');
 const { captureStripeFailure } = require('../utils/captureOpsError');
+const { logAction } = require('../utils/RequestTrace');
 
 const CreateProduct = async (req, res) => {
   const parsed = ProductsManager.validateCreateInput(req.body);
   if (parsed.error) {
+    logAction(req, 'warning', 'CreateProduct', 'invalid input');
     return res.status(400).json({ error: parsed.error });
   }
 
@@ -13,6 +15,7 @@ const CreateProduct = async (req, res) => {
   try {
     stripe = await getStripeInstance();
   } catch (error) {
+    logAction(req, 'error', 'CreateProduct', 'stripe', error);
     captureStripeFailure(error, { phase: 'billing.products.getStripe' });
     return res.status(500).json({ error: 'Internal server error' });
   }
@@ -25,6 +28,7 @@ const CreateProduct = async (req, res) => {
     stripe
   );
   if (!stripeResult.success) {
+    logAction(req, 'error', 'CreateProduct', 'stripe create');
     captureStripeFailure(stripeResult.error || 'createInStripe failed', {
       phase: 'billing.products.createStripe',
     });
@@ -48,6 +52,7 @@ const CreateProduct = async (req, res) => {
   try {
     db = await connectDB();
   } catch (error) {
+    logAction(req, 'error', 'CreateProduct', `db stripe_product=${stripeResult.stripe_product_id}`, error);
     captureStripeFailure(error, { phase: 'billing.products.connectDB' });
     return res.status(500).json({ error: 'Internal server error' });
   }
@@ -74,6 +79,7 @@ const CreateProduct = async (req, res) => {
     db
   );
   if (!insert.success) {
+    logAction(req, 'error', 'CreateProduct', `insert stripe_product=${stripeResult.stripe_product_id}`);
     captureStripeFailure(insert.error || 'insertInDB failed', {
       phase: 'billing.products.insertDB',
       stripe_product_id: stripeResult.stripe_product_id,
@@ -82,6 +88,7 @@ const CreateProduct = async (req, res) => {
     return res.status(500).json({ error: insert.error || 'Error guardando producto' });
   }
 
+  logAction(req, 'info', 'CreateProduct', `ok stripe_product=${stripeResult.stripe_product_id} facturama_pending=${facturama_pending}`);
   return res.status(201).json({
     data: insert.product,
     facturama_pending,

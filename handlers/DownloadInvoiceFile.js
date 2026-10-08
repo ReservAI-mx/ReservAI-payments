@@ -1,6 +1,7 @@
 const InvoiceManager = require('../utils/InvoiceManager');
 const { connectDB } = require('../data/connectDB');
 const { captureStripeFailure } = require('../utils/captureOpsError');
+const { logAction } = require('../utils/RequestTrace');
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -18,11 +19,13 @@ function makeDownloadHandler(kind) {
   return async (req, res) => {
     const invoiceId = req.params.id;
     if (!UUID_RE.test(String(invoiceId || ''))) {
+      logAction(req, 'warning', 'DownloadInvoiceFile', `invalid id kind=${kind}`);
       return res.status(400).json({ error: 'id inválido' });
     }
 
     const resolved = resolveAccountId(req);
     if (resolved.error) {
+      logAction(req, 'warning', 'DownloadInvoiceFile', `invalid account kind=${kind}`);
       return res.status(400).json({ error: resolved.error });
     }
 
@@ -30,6 +33,7 @@ function makeDownloadHandler(kind) {
     try {
       db = await connectDB();
     } catch (error) {
+      logAction(req, 'error', 'DownloadInvoiceFile', `db id=${invoiceId} kind=${kind}`, error);
       captureStripeFailure(error, { phase: `billing.invoices.download.${kind}.connectDB` });
       return res.status(500).json({ error: 'Internal server error' });
     }
@@ -43,6 +47,7 @@ function makeDownloadHandler(kind) {
     if (!result.success) {
       const status = result.status || 500;
       if (status >= 500) {
+        logAction(req, 'error', 'DownloadInvoiceFile', `id=${invoiceId} kind=${kind} status=${status}`);
         captureStripeFailure(result.error, { phase: `billing.invoices.download.${kind}` });
         return res.status(500).json({ error: 'Internal server error' });
       }
@@ -52,7 +57,9 @@ function makeDownloadHandler(kind) {
             ? result.error
             : 'INVOICE_NOT_FOUND'
           : 'Internal server error';
-      return res.status(status === 404 ? 404 : 500).json({ error: safe });
+      const httpStatus = status === 404 ? 404 : 500;
+      logAction(req, httpStatus === 404 ? 'warning' : 'error', 'DownloadInvoiceFile', `id=${invoiceId} kind=${kind} status=${httpStatus} result=${safe}`);
+      return res.status(httpStatus).json({ error: safe });
     }
 
     res.setHeader('Content-Type', result.contentType);
@@ -60,6 +67,7 @@ function makeDownloadHandler(kind) {
       'Content-Disposition',
       `attachment; filename="${result.filename}"`
     );
+    logAction(req, 'info', 'DownloadInvoiceFile', `ok id=${invoiceId} account=${resolved.accountId} kind=${kind}`);
     return res.status(200).send(result.buffer);
   };
 }

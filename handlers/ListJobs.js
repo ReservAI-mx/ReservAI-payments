@@ -1,6 +1,7 @@
 const { connectDB } = require('../data/connectDB');
 const OpsJobManager = require('../utils/OpsJobManager');
 const PaginationManager = require('../utils/PaginationManager');
+const { logAction } = require('../utils/RequestTrace');
 
 const DEFAULT_STATUS = 'failed,dead';
 const PAGE_SIZE = Math.min(
@@ -12,7 +13,8 @@ const ListJobs = async (req, res) => {
   let db;
   try {
     db = await connectDB();
-  } catch {
+  } catch (error) {
+    logAction(req, 'error', 'ListJobs', 'db', error);
     return res.status(500).json({ error: 'Internal server error' });
   }
 
@@ -42,6 +44,7 @@ const ListJobs = async (req, res) => {
     );
     const total = result.total || 0;
     const totalPages = Math.max(1, Math.ceil(total / limit));
+    logAction(req, 'info', 'ListJobs', `ok page=${page} count=${result.jobs.length} status=${status}`);
     return res.status(200).json({
       jobs: result.jobs,
       total,
@@ -55,6 +58,7 @@ const ListJobs = async (req, res) => {
       search: search || '',
     });
   } catch (err) {
+    logAction(req, 'error', 'ListJobs', 'list', err);
     return res.status(500).json({ error: err.message || 'Internal server error' });
   }
 };

@@ -40,11 +40,12 @@ const CreateInvoiceFromPayment = require('../handlers/CreateInvoiceFromPayment')
 const { DownloadInvoicePdf, DownloadInvoiceXml } = require('../handlers/DownloadInvoiceFile');
 const DownloadTicketPdf = require('../handlers/DownloadTicketPdf');
 const { ListMyPayments, ListAccountPayments } = require('../handlers/ListPayments');
+const { logAction } = require('../utils/RequestTrace');
 
 router.use(PathSecurityValidator.middleware());
 
 router.get('/health', (req, res) => {
-    console.log('Health check: OK, time: ', new Date().toISOString());
+    logAction(req, 'info', 'health', 'ok');
     return res.status(200).json({
       status: 'OK',
       uptime: process.uptime(),

@@ -5,6 +5,7 @@ const ProductsManager = require('../utils/ProductsManager');
 const getStripeInstance = require('../data/StripeInstanceGetter');
 const { connectDB } = require('../data/connectDB');
 const { captureStripeFailure } = require('../utils/captureOpsError');
+const { logAction } = require('../utils/RequestTrace');
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -12,6 +13,7 @@ const ActivateSubscription = async (req, res) => {
     const { customer, account } = req;
     const technical_info_id = req.body && req.body.technical_info_id;
     if (!UUID_RE.test(String(technical_info_id || ''))) {
+        logAction(req, 'warning', 'ActivateSubscription', `invalid technical_info account=${account.id}`);
         return res.status(400).json({ error: 'Falta technical_info_id o no es uuid' });
     }
 
@@ -19,6 +21,7 @@ const ActivateSubscription = async (req, res) => {
     try {
         db = await connectDB();
     } catch (error) {
+        logAction(req, 'error', 'ActivateSubscription', `db account=${account.id}`, error);
         captureStripeFailure(error, { phase: 'billing.activate.connectDB' });
         return res.status(500).json({ error: 'Internal server error' });
     }
@@ -29,6 +32,7 @@ const ActivateSubscription = async (req, res) => {
         db
     );
     if (lookup.error) {
+        logAction(req, 'error', 'ActivateSubscription', `lookup id=${technical_info_id}`);
         captureStripeFailure(lookup.error, {
             phase: 'billing.activate.lookup',
             technical_info_id,
@@ -36,9 +40,11 @@ const ActivateSubscription = async (req, res) => {
         return res.status(500).json({ error: lookup.error });
     }
     if (!lookup.setup) {
+        logAction(req, 'warning', 'ActivateSubscription', `missing id=${technical_info_id}`);
         return res.status(404).json({ error: 'technical_info no existe o no es de esta cuenta' });
     }
     if (lookup.setup.status !== 'ready_for_subscription' || lookup.setup.stripe_subscription_id) {
+        logAction(req, 'warning', 'ActivateSubscription', `not ready id=${technical_info_id} status=${lookup.setup.status}`);
         return res.status(409).json({ error: 'SETUP_NOT_READY' });
     }
 
@@ -54,6 +60,7 @@ const ActivateSubscription = async (req, res) => {
     try {
         stripe = await getStripeInstance();
     } catch (error) {
+        logAction(req, 'error', 'ActivateSubscription', `stripe id=${technical_info_id}`, error);
         captureStripeFailure(error, { phase: 'billing.activate.getStripe' });
         return res.status(500).json({ error: 'Internal server error' });
     }
@@ -75,6 +82,7 @@ const ActivateSubscription = async (req, res) => {
         db
     );
     if (!result.success) {
+        logAction(req, 'error', 'ActivateSubscription', `checkout id=${technical_info_id}`);
         captureStripeFailure(result.error || 'Error creating checkout session', {
             phase: 'billing.activate.createCheckout',
             technical_info_id,
@@ -82,6 +90,7 @@ const ActivateSubscription = async (req, res) => {
         return res.status(500).json({ error: result.error || 'Error creating checkout session' });
     }
 
+    logAction(req, 'info', 'ActivateSubscription', `ok id=${technical_info_id} account=${account.id}`);
     return res.status(200).json({
         url: result.url,
         session_id: result.session_id,

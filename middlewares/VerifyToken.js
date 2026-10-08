@@ -2,7 +2,7 @@ const TokenClass = require('../utils/TokenClass');
 const TokenManager = require('../utils/TokenManager');
 const ApiKeyManager = require('../utils/ApiKeyManager');
 const CookieAuth = require('../utils/CookieAuth');
-const { addRequestTraceStep } = require('../utils/RequestTrace');
+const { addRequestTraceStep, logAction } = require('../utils/RequestTrace');
 
 /** Billing solo necesita sesión access; priorizar esa cookie si coexisten otras. */
 const DEFAULT_PRIORITY = [
@@ -51,6 +51,7 @@ const VerifyToken = async (req, res, next) => {
         const apiKeyId = ApiKeyManager.VerifyApiKey(headerToken);
         if (apiKeyId) {
             if (isProduction) {
+                logAction(req, 'warning', 'VerifyToken', 'api key disabled');
                 return res.status(403).json({
                     error: 'API Keys are disabled in production',
                     message: 'Please use JWT cookies for authentication',
@@ -71,6 +72,7 @@ const VerifyToken = async (req, res, next) => {
 
     const best = pickBestValidCookie(req);
     if (!best) {
+        logAction(req, 'warning', 'VerifyToken', 'token required');
         return res.status(418).json({ error: 'Token is required' });
     }
 

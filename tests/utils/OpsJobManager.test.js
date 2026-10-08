@@ -1,21 +1,6 @@
-jest.mock('../../instrument-sentry', () => ({
-  withScope: jest.fn((cb) => {
-    const scope = {
-      setTag: jest.fn(),
-      setContext: jest.fn(),
-    };
-    cb(scope);
-    return scope;
-  }),
-  captureException: jest.fn(),
-  flush: jest.fn(async () => true),
-}));
-
-const Sentry = require('../../instrument-sentry');
 const {
   captureOpsError,
   captureStripeFailure,
-  flushSentry,
 } = require('../../utils/captureOpsError');
 const OpsJobManager = require('../../utils/OpsJobManager');
 
@@ -41,8 +26,6 @@ describe('captureOpsError', () => {
   let errSpy;
 
   beforeEach(() => {
-    Sentry.captureException.mockClear();
-    Sentry.withScope.mockClear();
     errSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
   });
 
@@ -54,7 +37,6 @@ describe('captureOpsError', () => {
     const err = captureOpsError('boom', { job_id: 'j1', phase: 'ops.test' });
     expect(err).toBeInstanceOf(Error);
     expect(err.message).toBe('boom');
-    expect(Sentry.captureException).toHaveBeenCalled();
     expect(errSpy).toHaveBeenCalled();
     expect(String(errSpy.mock.calls[0][0])).toContain('[stripe][ops.test]');
     expect(String(errSpy.mock.calls[0][0])).toContain('boom');
@@ -66,12 +48,6 @@ describe('captureOpsError', () => {
       phase: 'webhook.checkout.insert',
       event_type: 'checkout.session.completed',
     });
-    expect(Sentry.captureException).toHaveBeenCalled();
     expect(errSpy).toHaveBeenCalled();
-  });
-
-  it('flushSentry calls Sentry.flush', async () => {
-    await flushSentry(100);
-    expect(Sentry.flush).toHaveBeenCalledWith(100);
   });
 });

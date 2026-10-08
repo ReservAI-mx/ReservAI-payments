@@ -26,7 +26,6 @@ jest.mock('../../utils/OpenAICredentialsManager', () => ({
 jest.mock('../../utils/captureOpsError', () => ({
   captureOpsError: jest.fn((e) => (e instanceof Error ? e : new Error(String(e)))),
   captureStripeFailure: jest.fn((e) => (e instanceof Error ? e : new Error(String(e)))),
-  flushSentry: jest.fn(async () => {}),
 }));
 
 const { connectDB } = require('../../data/connectDB');
@@ -44,7 +43,7 @@ const InvoiceManager = require('../../utils/InvoiceManager');
 const getStripeInstance = require('../../data/StripeInstanceGetter');
 const CreatePasswordsClient = require('../../utils/CreatePasswordsClient');
 const { ensureCredentials } = require('../../utils/OpenAICredentialsManager');
-const { captureStripeFailure, flushSentry } = require('../../utils/captureOpsError');
+const { captureStripeFailure } = require('../../utils/captureOpsError');
 const WebhooksRouter = require('../../handlers/WebhooksRouter');
 const { loadStripeFixture } = require('../helpers/stripeFixtures');
 const { createMockReq, createMockRes } = require('../helpers/mockReqRes');
@@ -57,7 +56,6 @@ describe('WebhooksRouter', () => {
   beforeEach(() => {
     connectDB.mockResolvedValue(db);
     captureStripeFailure.mockClear();
-    flushSentry.mockClear();
     CustomersManager.createCustomerInDB.mockResolvedValue({ success: true });
     CustomersManager.getCustomersEmailAndName.mockResolvedValue({
       success: true,
@@ -297,7 +295,6 @@ describe('WebhooksRouter', () => {
         plannedPlan: 'basico',
       })
     );
-    expect(flushSentry).toHaveBeenCalled();
   });
 
   it('checkout.session.completed setup with fiscal ready sends CFDI docs and skips setup email', async () => {
@@ -317,7 +314,7 @@ describe('WebhooksRouter', () => {
     expect(SetupPaidAlertManager.notifyTeam).toHaveBeenCalled();
   });
 
-  it('checkout insert soft-failure reports to Sentry', async () => {
+  it('checkout insert soft-failure reports the error', async () => {
     TechnicalInfoManager.insertFromSetupSession.mockResolvedValueOnce({
       success: false,
       error: 'null value in column "environment" of relation "technical_info" violates not-null constraint',
@@ -333,7 +330,6 @@ describe('WebhooksRouter', () => {
       })
     );
     expect(SetupPaidAlertManager.notifyTeam).not.toHaveBeenCalled();
-    expect(flushSentry).toHaveBeenCalled();
   });
 
   it('checkout.session.completed setup replay (ON CONFLICT) does not alert again', async () => {

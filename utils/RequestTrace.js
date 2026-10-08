@@ -1,6 +1,5 @@
 /**
- * Acumula en req el flujo de middlewares ejecutados (orden, tiempos, datos no sensibles)
- * para enriquecer Sentry sin persistir secretos ni tokens en claro.
+ * Acumula en req el flujo de middlewares ejecutados (orden, tiempos, datos no sensibles).
  */
 
 const { getClientIp } = require('./ClientIp');
@@ -44,6 +43,29 @@ function sanitizeDetailKey(key) {
     return /password|secret|authorization|cookie|^token$/i.test(key);
 }
 
+function redact(text) {
+    return String(text == null ? '' : text)
+        .replace(/Bearer\s+\S+/gi, 'Bearer [REDACTED]')
+        .replace(/(password|token|secret|authorization|cookie)=\S+/gi, '$1=[REDACTED]');
+}
+
+function logAction(req, level, event, message, err) {
+    const errText = err == null
+        ? ''
+        : (typeof err === 'object' && err.message ? err.message : String(err));
+    const text = redact(errText ? `${message}: ${errText}` : message);
+    const traceId = req && req.trace && req.trace.trace_id ? req.trace.trace_id : '-';
+    const line = `${new Date().toISOString()} [${level}] trace=${traceId} ${event} ${text}`;
+    if (level === 'error') console.error(line);
+    else if (level === 'warning') console.warn(line);
+    else console.log(line);
+
+    const tracer = req && req.trace;
+    if (!tracer || typeof tracer[level] !== 'function') return;
+    if (level === 'error') tracer.error(text, err && typeof err === 'object' ? err : undefined, event);
+    else tracer[level](text, event);
+}
+
 function addRequestTraceStep(req, stepName, details = {}) {
     ensureTrace(req);
     const ms = Date.now() - req.passRequestTrace.startedAt;
@@ -61,61 +83,13 @@ function addRequestTraceStep(req, stepName, details = {}) {
         step: stepName,
         ...safe,
     });
-}
-
-function safeParams(params) {
-    if (!params || typeof params !== 'object') return {};
-    const out = {};
-    for (const [k, v] of Object.entries(params)) {
-        if (/token/i.test(k)) out[k] = '[redacted]';
-        else out[k] = typeof v === 'string' ? v.slice(0, 64) : v;
-    }
-    return out;
-}
-
-/**
- * Contexto listo para scope.setContext('request_flow', …) en Sentry.
- */
-function buildSentryFlowContext(req) {
-    ensureTrace(req);
-    const trace = req.passRequestTrace;
-
-    const actor = {};
-    if (req.account?.id) {
-        actor.account_id = String(req.account.id);
-        actor.account_type = req.account.type;
-        actor.verified = req.account.verified;
-    }
-    if (req.token_id && !actor.account_id) {
-        actor.jwt_subject_id = String(req.token_id);
-    }
-
-    const target = {};
-    if (req.account_id_url?.id) target.target_account_id = String(req.account_id_url.id);
-    if (req.account_type_url?.type) target.target_account_type = req.account_type_url.type;
-
-    const route = {
-        method: req.method,
-        path: typeof req.originalUrl === 'string' ? req.originalUrl.split('?')[0] : '',
-    };
-    if (req.baseUrl) route.baseUrl = req.baseUrl;
-    if (req.route?.path) route.pattern = `${req.baseUrl || ''}${req.route.path}`;
-    if (req.params && Object.keys(req.params).length) route.params = safeParams(req.params);
-
-    return {
-        elapsed_ms: Date.now() - trace.startedAt,
-        client_ip: trace.clientIp || req.ip,
-        user_agent: trace.userAgent,
-        middleware_flow: trace.steps,
-        actor,
-        target,
-        jwt_token_type: req.token_type || null,
-        route,
-    };
+    const fields = Object.entries(safe).map(([k, v]) => `${k}=${v}`).join(' ');
+    const level = details && details.ok === false ? 'warning' : 'info';
+    logAction(req, level, stepName, fields || stepName);
 }
 
 module.exports = {
     requestTraceMiddleware,
     addRequestTraceStep,
-    buildSentryFlowContext,
+    logAction,
 };

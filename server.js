@@ -1,6 +1,5 @@
 // Cargar variables de entorno
 require('dotenv').config();
-const Sentry = require('./instrument-sentry');
 // Configurar zona horaria para Guadalajara, Jalisco, México
 const timezone = process.env.TIMEZONE || 'America/Mexico_City';
 process.env.TZ = timezone;
@@ -21,7 +20,7 @@ const SQLInjectionDetector = require('./middlewares/SQLInjectionDetector');
 const VerifyProxySecret = require('./middlewares/VerifyProxySecret');
 const VerifyCsrfOrigin = require('./middlewares/VerifyCsrfOrigin');
 const { requestTraceMiddleware } = require('./utils/RequestTrace');
-const { sentryHttp5xxCapture } = require('./middlewares/SentryHttp5xxCapture');
+const { Tracer } = require('./utils/ObservabilityClient');
 const { getClientIp } = require('./utils/ClientIp');
 
 // Uso: node server.js [puerto] [environment]
@@ -107,6 +106,7 @@ function createApp(options = {}) {
   app.set('trust proxy', 1);
   // Log de entrada/salida lo antes posible (incluye webhooks y 403 de proxy).
   app.use(requestTraceMiddleware);
+  app.use(Tracer.middleware());
   app.use(VerifyProxySecret);
 
   app.use('/webhooks', express.raw({ type: 'application/json' }), VerifyStripeEvent, webhookRouter);
@@ -119,12 +119,8 @@ function createApp(options = {}) {
     app.use(rateLimit(limiterOptions));
   }
 
-  app.use(sentryHttp5xxCapture);
-
   app.use('/api/billing', SQLInjectionDetector.middleware(), apiRouter);
   app.use('/api', SQLInjectionDetector.middleware(), apiRouter);
-
-  Sentry.setupExpressErrorHandler(app);
 
   return app;
 }

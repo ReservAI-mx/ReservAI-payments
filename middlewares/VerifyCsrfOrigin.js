@@ -1,3 +1,5 @@
+const { logAction } = require('../utils/RequestTrace');
+
 const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
 const WRITE_GET_PATHS = new Set([
@@ -80,9 +82,11 @@ function VerifyCsrfOrigin(req, res, next) {
   if (MUTATING_METHODS.has(method)) {
     const origin = requestOrigin(req);
     if (!origin || !allowedOrigins().includes(origin)) {
+      logAction(req, 'warning', 'VerifyCsrfOrigin', 'rejected');
       return res.status(403).json({ error: 'CSRF validation failed' });
     }
     if (!isAllowedContentType(req, pathname)) {
+      logAction(req, 'warning', 'VerifyCsrfOrigin', 'unsupported media type');
       return res.status(415).json({ error: 'Unsupported Media Type' });
     }
     return next();
@@ -90,6 +94,7 @@ function VerifyCsrfOrigin(req, res, next) {
 
   if (method === 'GET' && WRITE_GET_PATHS.has(pathname)) {
     if (!hasWriteGetHeader(req)) {
+      logAction(req, 'warning', 'VerifyCsrfOrigin', 'rejected');
       return res.status(403).json({ error: 'CSRF validation failed' });
     }
   }

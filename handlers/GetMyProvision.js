@@ -1,6 +1,7 @@
 const TechnicalInfoManager = require('../utils/TechnicalInfoManager');
 const PaginationManager = require('../utils/PaginationManager');
 const { connectDB } = require('../data/connectDB');
+const { logAction } = require('../utils/RequestTrace');
 
 const GetMyProvision = async (req, res) => {
     const { account } = req;
@@ -12,6 +13,7 @@ const GetMyProvision = async (req, res) => {
     try {
         db = await connectDB();
     } catch (error) {
+        logAction(req, 'error', 'GetMyProvision', `db account=${account.id}`, error);
         return res.status(500).json({ error: 'Internal server error' });
     }
 
@@ -23,6 +25,7 @@ const GetMyProvision = async (req, res) => {
         db
     );
     if (result.error) {
+        logAction(req, 'error', 'GetMyProvision', `list account=${account.id}`);
         return res.status(500).json({ error: result.error });
     }
 
@@ -33,6 +36,7 @@ const GetMyProvision = async (req, res) => {
         data = data.slice(0, limit);
     }
 
+    logAction(req, 'info', 'GetMyProvision', `ok account=${account.id} page=${page} count=${data.length}`);
     return res.status(200).json({
         data,
         total,
