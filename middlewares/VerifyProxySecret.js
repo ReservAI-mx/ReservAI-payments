@@ -1,4 +1,5 @@
 const crypto = require('crypto');
+const { logAction } = require('../utils/RequestTrace');
 
 const DEFAULT_HEADER = 'x-proxy-secret';
 const SKIP_PATHS = new Set([
@@ -55,7 +56,7 @@ function VerifyProxySecret(req, res, next) {
   const expected = process.env.PROXY_SECRET_HEADER;
   if (!expected) {
     if (isProduction()) {
-      console.error('❌ PROXY_SECRET_HEADER no configurado en production');
+      logAction(req, 'error', 'VerifyProxySecret', 'misconfigured');
       return res.status(503).json({ error: 'Service misconfigured' });
     }
     return next();
@@ -63,9 +64,7 @@ function VerifyProxySecret(req, res, next) {
 
   const provided = req.get(headerName());
   if (!provided || !timingSafeEqualString(provided, expected)) {
-    console.warn(
-      `[SECURITY] Proxy secret inválido o ausente: ${req.method} ${req.originalUrl} ip=${req.socket?.remoteAddress}`
-    );
+    logAction(req, 'warning', 'VerifyProxySecret', 'rejected');
     return res.status(403).json({ error: 'Forbidden' });
   }
 

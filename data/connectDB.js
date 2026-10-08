@@ -31,16 +31,12 @@ function isTransientDbError(err) {
 function reportTransientDbError(err, source) {
     console.error(`⚠️  Error transitorio de DB (${source}):`, err?.code || err?.message || err);
     try {
-        const Sentry = require('@sentry/node');
-        Sentry.withScope((scope) => {
-            scope.setLevel('warning');
-            scope.setTag('error_source', 'db_network');
-            scope.setTag('db_error_code', String(err?.code || 'unknown'));
-            scope.setExtra('handler', source);
-            Sentry.captureException(err);
-        });
+        const { Tracer } = require('../utils/ObservabilityClient');
+        const tracer = new Tracer();
+        tracer.error(`Error transitorio de DB (${source})`, err, 'db_network');
+        tracer.flush().catch(() => {});
     } catch {
-        /* Sentry opcional */
+        /* no tumbar el proceso si el cliente de observabilidad falla */
     }
 }
 

@@ -2,6 +2,7 @@ const InvoiceManager = require('../utils/InvoiceManager');
 const EmailManager = require('../utils/EmailManager');
 const { connectDB } = require('../data/connectDB');
 const { captureStripeFailure } = require('../utils/captureOpsError');
+const { logAction } = require('../utils/RequestTrace');
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -41,7 +42,7 @@ function toClientError(result) {
   return { status: 500, error: 'Internal server error' };
 }
 
-function notifyInternalInvoiceFailure({
+function notifyInternalInvoiceFailure(req, {
   accountId,
   paymentHistoryId,
   email,
@@ -71,24 +72,26 @@ function notifyInternalInvoiceFailure({
     .then(() => EmailManager.sendEmailToInternalTeam(subject, html, text))
     .then((sent) => {
       if (!sent?.success) {
-        console.error(
-          `[invoice] internal alert email failed: ${sent?.error || 'unknown'}`
-        );
+        logAction(req, 'error', 'CreateInvoiceFromPayment', `alert email payment=${paymentHistoryId} account=${accountId}`);
+        if (req.trace) req.trace.flush(500).catch(() => {});
       }
     })
     .catch((err) => {
-      console.error('[invoice] internal alert email threw:', err?.message || err);
+      logAction(req, 'error', 'CreateInvoiceFromPayment', `alert email payment=${paymentHistoryId} account=${accountId}`, err);
+      if (req.trace) req.trace.flush(500).catch(() => {});
     });
 }
 
 const CreateInvoiceFromPayment = async (req, res) => {
   const paymentHistoryId = req.params.payment_history_id;
   if (!UUID_RE.test(String(paymentHistoryId || ''))) {
+    logAction(req, 'warning', 'CreateInvoiceFromPayment', 'invalid payment_history_id');
     return res.status(400).json({ error: 'payment_history_id inválido' });
   }
 
   const resolved = resolveAccountId(req);
   if (resolved.error) {
+    logAction(req, 'warning', 'CreateInvoiceFromPayment', 'invalid account_id');
     return res.status(400).json({ error: resolved.error });
   }
 
@@ -96,13 +99,10 @@ const CreateInvoiceFromPayment = async (req, res) => {
   try {
     db = await connectDB();
   } catch (error) {
+    logAction(req, 'error', 'CreateInvoiceFromPayment', `db payment=${paymentHistoryId}`, error);
     captureStripeFailure(error, { phase: 'billing.invoices.create.connectDB' });
     return res.status(500).json({ error: 'Internal server error' });
   }
-
-  console.log(
-    `[invoice] createFromPayment start payment=${paymentHistoryId} account=${resolved.accountId}`
-  );
 
   const result = await InvoiceManager.createFromPayment(
     resolved.accountId,
@@ -113,11 +113,10 @@ const CreateInvoiceFromPayment = async (req, res) => {
 
   if (!result.success) {
     const client = toClientError(result);
-    console.error(
-      `[invoice] createFromPayment failed payment=${paymentHistoryId} status=${result.status || 500} error=${result.error || 'unknown'}`
-    );
+    const failMsg = `payment=${paymentHistoryId} account=${resolved.accountId} status=${client.status} result=${client.error}`;
+    logAction(req, client.status >= 500 ? 'error' : 'warning', 'CreateInvoiceFromPayment', failMsg);
     if (client.error === 'FACTURAMA_UNAVAILABLE') {
-      notifyInternalInvoiceFailure({
+      notifyInternalInvoiceFailure(req, {
         accountId: resolved.accountId,
         paymentHistoryId,
         email: req.account?.email,
@@ -145,9 +144,7 @@ const CreateInvoiceFromPayment = async (req, res) => {
     return res.status(client.status).json({ error: client.error });
   }
 
-  console.log(
-    `[invoice] createFromPayment ok payment=${paymentHistoryId} already_exists=${!!result.already_exists}`
-  );
+  logAction(req, 'info', 'CreateInvoiceFromPayment', `ok payment=${paymentHistoryId} account=${resolved.accountId} already_exists=${!!result.already_exists}`);
   return res.status(result.already_exists ? 200 : 201).json({
     data: result.invoice,
     already_exists: !!result.already_exists,

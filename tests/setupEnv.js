@@ -20,8 +20,6 @@ process.env.EMAIL_TO2 = process.env.EMAIL_TO2 || 'alerts2@example.com';
 process.env.CORS_ORIGIN = process.env.CORS_ORIGIN || 'http://localhost:3000';
 process.env.CORS_CREDENTIALS = process.env.CORS_CREDENTIALS || 'true';
 process.env.IS_PRODUCTION = 'false';
-process.env.SENTRY_DSN = '';
-process.env.SENTRY_TRACES_SAMPLE_RATE = '0';
 process.env.RATE_LIMIT_MAX_REQUESTS = process.env.RATE_LIMIT_MAX_REQUESTS || '1000';
 process.env.RATE_LIMIT_WINDOW_MS = process.env.RATE_LIMIT_WINDOW_MS || '900000';
 process.env.DB_HOST = process.env.DB_HOST || 'localhost';
@@ -47,7 +45,7 @@ process.env.RESERVAI_SETUP_CONSTANTS = process.env.RESERVAI_SETUP_CONSTANTS || J
   google_client_secret: 'gsecret-test',
   oauth_client_secret: 'oauth-test',
   minio_root_user: 'root',
-  // = setup.shared (WhatsApp Embedded Signup / SMTP / Sentry opcionales pero típicos)
+  // = setup.shared (WhatsApp Embedded Signup / SMTP opcionales pero típicos)
   whatsapp_app_id: 'wa-app-test',
   whatsapp_configuration_id: 'wa-config-test',
   whatsapp_app_secret: 'wa-secret-test',

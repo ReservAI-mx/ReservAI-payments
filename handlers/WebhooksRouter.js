@@ -15,7 +15,14 @@ const ProvisionFanout = require('../utils/ProvisionFanout');
 const InvoiceManager = require('../utils/InvoiceManager');
 const getStripeInstance = require('../data/StripeInstanceGetter');
 const SetupProvisionManager = require('../utils/SetupProvisionManager');
-const { captureOpsError, captureStripeFailure, flushSentry } = require('../utils/captureOpsError');
+const { captureOpsError, captureStripeFailure } = require('../utils/captureOpsError');
+const { logAction } = require('../utils/RequestTrace');
+
+async function flushTraceIfError(req, res) {
+    if (req.trace && req.trace.hasError()) {
+        await req.trace.flush(res.statusCode).catch(() => {});
+    }
+}
 
 function webhookCtx(event, phase, extra = {}) {
     return { area: 'webhook', phase, event_type: event?.type, ...extra };
@@ -31,8 +38,9 @@ const WebhooksRouter = async (req, res) => {
     try {
         db = await connectDB();
     } catch (error) {
+        logAction(req, 'error', 'WebhooksRouter', `connectDB type=${event?.type}`, error);
         captureOpsError(error, webhookCtx(event, 'webhook.connectDB'));
-        await flushSentry();
+        await flushTraceIfError(req, res);
         return;
     }
     // Procesar el evento de forma asíncrona
@@ -45,9 +53,11 @@ const WebhooksRouter = async (req, res) => {
                 const customer = CustomerInfo.fromStripeObject(event.data.object);
                 const result = await CustomersManager.createCustomerInDB(customer.account_id, customer.stripe_customer_id, db);
                 if (result.error) {
+                    logAction(req, 'error', 'WebhooksRouter', `customer.created account=${customer.account_id}`);
                     captureStripeFailure(result.error, webhookCtx(event, 'webhook.customer.created'));
                     break;
                 }
+                logAction(req, 'info', 'WebhooksRouter', `customer.created ok account=${customer.account_id}`);
                 break;
 
             case 'customer.subscription.created':
@@ -56,6 +66,7 @@ const WebhooksRouter = async (req, res) => {
                     eventData = subscription; // Guardar la instancia para el email
                     const result = await SubscriptionManager.createSubscriptionInDB(subscription, db);
                     if (!result.success) {
+                        logAction(req, 'error', 'WebhooksRouter', `subscription.created sub=${subscription.stripe_subscription_id}`);
                         captureStripeFailure(
                             result.error || 'createSubscriptionInDB failed',
                             webhookCtx(event, 'webhook.subscription.created')
@@ -79,7 +90,9 @@ const WebhooksRouter = async (req, res) => {
                         'ok',
                         db
                     );
+                    logAction(req, 'info', 'WebhooksRouter', `subscription.created ok sub=${subscription.stripe_subscription_id}`);
                 } catch (error) {
+                    logAction(req, 'error', 'WebhooksRouter', 'subscription.created', error);
                     captureOpsError(error, webhookCtx(event, 'webhook.subscription.created'));
                 }
                 break;
@@ -111,10 +124,13 @@ const WebhooksRouter = async (req, res) => {
                         eventData = subscription; // Guardar la instancia para el email
                         const result = await SubscriptionManager.updateSubscriptionInDB(subscription, db);
                         if (!result.success) {
+                            logAction(req, 'error', 'WebhooksRouter', `subscription.updated sub=${subscription.stripe_subscription_id}`);
                             captureStripeFailure(
                                 result.error || 'updateSubscriptionInDB failed',
                                 webhookCtx(event, 'webhook.subscription.updated')
                             );
+                        } else {
+                            logAction(req, 'info', 'WebhooksRouter', `subscription.updated ok sub=${subscription.stripe_subscription_id}`);
                         }
                         const fanoutTenant = await TechnicalInfoManager.getForFanout(
                             subscription.stripe_subscription_id,
@@ -130,6 +146,7 @@ const WebhooksRouter = async (req, res) => {
                         }
                     }
                 } catch (error) {
+                    logAction(req, 'error', 'WebhooksRouter', 'subscription.updated', error);
                     captureOpsError(error, webhookCtx(event, 'webhook.subscription.updated'));
                 }
                 break;
@@ -147,6 +164,7 @@ const WebhooksRouter = async (req, res) => {
                         db
                     );
                     if (!result.success) {
+                        logAction(req, 'error', 'WebhooksRouter', `subscription.deleted sub=${subscriptionId}`);
                         captureStripeFailure(
                             result.error || 'updateSubscriptionOnCancellation failed',
                             webhookCtx(event, 'webhook.subscription.deleted')
@@ -162,7 +180,11 @@ const WebhooksRouter = async (req, res) => {
                     if (fanoutTenant.tenant?.id) {
                         await ProvisionFanout.notify(fanoutTenant.tenant.id, 'disable_renewal', db);
                     }
+                    if (result.success) {
+                        logAction(req, 'info', 'WebhooksRouter', `subscription.deleted ok sub=${subscriptionId}`);
+                    }
                 } catch (error) {
+                    logAction(req, 'error', 'WebhooksRouter', `subscription.deleted sub=${subscriptionId}`, error);
                     captureOpsError(error, webhookCtx(event, 'webhook.subscription.deleted'));
                 }
                 break;
@@ -175,10 +197,9 @@ const WebhooksRouter = async (req, res) => {
                     
                     // Si el invoice tiene una suscripción asociada, actualizar los períodos
                     if (!subscriptionId) {
-                        console.log('invoice.payment_succeeded no-sub', invoice.id);
+                        logAction(req, 'info', 'WebhooksRouter', `payment_succeeded no-sub invoice=${invoice.id}`);
                     }
                     if (subscriptionId) {
-                        console.log('invoice.payment_succeeded', subscriptionId);
                         const customerId = invoice.customer;
                         const periodStart = invoice.period_start ? new Date(invoice.period_start * 1000) : null;
                         const periodEnd = invoice.period_end ? new Date(invoice.period_end * 1000) : null;
@@ -192,6 +213,7 @@ const WebhooksRouter = async (req, res) => {
                                 db
                             );
                             if (!result.success) {
+                                logAction(req, 'error', 'WebhooksRouter', `payment_succeeded sub=${subscriptionId}`);
                                 captureStripeFailure(
                                     result.error || 'updateSubscriptionOnPaymentSuccess failed',
                                     webhookCtx(event, 'webhook.payment_succeeded')
@@ -206,6 +228,7 @@ const WebhooksRouter = async (req, res) => {
                         eventData = invoice;
                         const paymentResult = await PaymentHistoryManager.createPaymentHistoryInDB(paymentHistory, db);
                         if (!paymentResult.success) {
+                            logAction(req, 'error', 'WebhooksRouter', `payment_succeeded history sub=${subscriptionId}`);
                             captureStripeFailure(
                                 paymentResult.error || 'createPaymentHistoryInDB failed',
                                 webhookCtx(event, 'webhook.payment_succeeded.history')
@@ -252,17 +275,17 @@ const WebhooksRouter = async (req, res) => {
                                     if (auto.emailed) {
                                         cfdiDocumentsEmailSent = true;
                                     } else if (auto.error) {
+                                        logAction(req, 'error', 'WebhooksRouter', `payment_succeeded cfdi sub=${subscriptionId}`);
                                         captureStripeFailure(
                                             auto.error,
                                             webhookCtx(event, 'webhook.payment_succeeded.cfdi')
                                         );
                                     } else if (auto.skipped) {
-                                        console.log(
-                                            `[stripe][webhook] auto CFDI skipped reason=${auto.reason} sub=${subscriptionId}`
-                                        );
+                                        logAction(req, 'info', 'WebhooksRouter', `payment_succeeded cfdi skipped reason=${auto.reason} sub=${subscriptionId}`);
                                     }
                                 }
                             } catch (cfdiError) {
+                                logAction(req, 'error', 'WebhooksRouter', `payment_succeeded cfdi sub=${subscriptionId}`, cfdiError);
                                 captureOpsError(
                                     cfdiError,
                                     webhookCtx(event, 'webhook.payment_succeeded.cfdi')
@@ -275,9 +298,7 @@ const WebhooksRouter = async (req, res) => {
                             db
                         );
                         if (cancelLookup.cancel_at_period_end) {
-                            console.log(
-                                `[stripe][webhook] skip enable_renewal cancel_at_period_end sub=${subscriptionId}`
-                            );
+                            logAction(req, 'info', 'WebhooksRouter', `skip enable_renewal cancel_at_period_end sub=${subscriptionId}`);
                         } else {
                             const fanoutTenant = await TechnicalInfoManager.getForFanout(
                                 subscriptionId,
@@ -289,18 +310,14 @@ const WebhooksRouter = async (req, res) => {
                                     'enable_renewal',
                                     db
                                 );
-                                console.log(
-                                    `[stripe][webhook] enable_renewal tenant=${fanoutTenant.tenant.id} sub=${subscriptionId}`,
-                                    fanout
-                                );
+                                logAction(req, 'info', 'WebhooksRouter', `enable_renewal tenant=${fanoutTenant.tenant.id} sub=${subscriptionId} ok=${!!fanout.success}`);
                             } else {
-                                console.log(
-                                    `[stripe][webhook] skip enable_renewal no tenant sub=${subscriptionId}`
-                                );
+                                logAction(req, 'info', 'WebhooksRouter', `skip enable_renewal no tenant sub=${subscriptionId}`);
                             }
                         }
                     }
                 } catch (error) {
+                    logAction(req, 'error', 'WebhooksRouter', 'payment_succeeded', error);
                     captureOpsError(error, webhookCtx(event, 'webhook.payment_succeeded'));
                 }
                 break;
@@ -313,7 +330,6 @@ const WebhooksRouter = async (req, res) => {
                     
                     // Si el invoice tiene una suscripción asociada, actualizar el estado
                     if (subscriptionId) {
-                        console.log('invoice.payment_failed', subscriptionId);
                         const customerId = invoice.customer;
                         
                         const result = await SubscriptionManager.updateSubscriptionOnPaymentFailed(
@@ -323,6 +339,7 @@ const WebhooksRouter = async (req, res) => {
                             db
                         );
                         if (!result.success) {
+                            logAction(req, 'error', 'WebhooksRouter', `payment_failed sub=${subscriptionId}`);
                             captureStripeFailure(
                                 result.error || 'updateSubscriptionOnPaymentFailed failed',
                                 webhookCtx(event, 'webhook.payment_failed')
@@ -336,6 +353,7 @@ const WebhooksRouter = async (req, res) => {
                         eventData = invoice;
                         const paymentResult = await PaymentHistoryManager.createPaymentHistoryInDB(paymentHistory, db);
                         if (!paymentResult.success) {
+                            logAction(req, 'error', 'WebhooksRouter', `payment_failed history sub=${subscriptionId}`);
                             captureStripeFailure(
                                 paymentResult.error || 'createPaymentHistoryInDB failed',
                                 webhookCtx(event, 'webhook.payment_failed.history')
@@ -352,17 +370,13 @@ const WebhooksRouter = async (req, res) => {
                                 'disable_renewal',
                                 db
                             );
-                            console.log(
-                                `[stripe][webhook] disable_renewal tenant=${fanoutTenant.tenant.id} sub=${subscriptionId}`,
-                                fanout
-                            );
+                            logAction(req, 'info', 'WebhooksRouter', `disable_renewal tenant=${fanoutTenant.tenant.id} sub=${subscriptionId} ok=${!!fanout.success}`);
                         } else {
-                            console.log(
-                                `[stripe][webhook] skip disable_renewal no tenant sub=${subscriptionId}`
-                            );
+                            logAction(req, 'info', 'WebhooksRouter', `skip disable_renewal no tenant sub=${subscriptionId}`);
                         }
                     }
                 } catch (error) {
+                    logAction(req, 'error', 'WebhooksRouter', 'payment_failed', error);
                     captureOpsError(error, webhookCtx(event, 'webhook.payment_failed'));
                 }
                 break;
@@ -371,19 +385,15 @@ const WebhooksRouter = async (req, res) => {
                 try {
                     const session = event.data.object;
                     const metadata = session.metadata || {};
-                    console.log(
-                      `[stripe][webhook] checkout.session.completed id=${session.id} kind=${metadata.kind || '-'} subdomain=${metadata.subdomain || '-'}`
-                    );
+                    logAction(req, 'info', 'WebhooksRouter', `checkout.session.completed id=${session.id} kind=${metadata.kind || '-'} subdomain=${metadata.subdomain || '-'}`);
                     if (metadata.kind !== 'setup') {
-                        console.log('[stripe][webhook] skip provision: kind !== setup');
+                        logAction(req, 'info', 'WebhooksRouter', 'skip provision kind');
                         break;
                     }
                     const setup = await SetupProvisionManager.handleSetupPaid(session, db);
                     setupPaidInserted = Boolean(setup.inserted);
                     if (setup.eventData) eventData = setup.eventData;
-                    console.log(
-                      `[stripe][webhook] tenant=${setup.tenant ? setup.tenant.id : 'null'} status=${setup.tenant?.status || '-'} provision_error=${setup.tenant?.provision_error || '-'}`
-                    );
+                    logAction(req, 'info', 'WebhooksRouter', `checkout tenant=${setup.tenant ? setup.tenant.id : 'null'} status=${setup.tenant?.status || '-'}`);
                     // Cobro setup: payment_history + CFDI (mismo criterio que suscripción)
                     try {
                         let invoiceExtras = {};
@@ -401,6 +411,7 @@ const WebhooksRouter = async (req, res) => {
                                     number: inv.number || null,
                                 };
                             } catch (invErr) {
+                                logAction(req, 'error', 'WebhooksRouter', `checkout invoice cs=${session.id}`, invErr);
                                 captureStripeFailure(
                                     invErr.message || 'retrieve setup invoice failed',
                                     webhookCtx(event, 'webhook.checkout.invoice')
@@ -421,6 +432,7 @@ const WebhooksRouter = async (req, res) => {
                             const dup =
                                 /unique|duplicate/i.test(String(paymentResult.error || ''));
                             if (!dup) {
+                                logAction(req, 'error', 'WebhooksRouter', `checkout history cs=${session.id}`);
                                 captureStripeFailure(
                                     paymentResult.error || 'setup payment_history failed',
                                     webhookCtx(event, 'webhook.checkout.history')
@@ -457,24 +469,24 @@ const WebhooksRouter = async (req, res) => {
                             if (auto.emailed) {
                                 cfdiDocumentsEmailSent = true;
                             } else if (auto.error) {
+                                logAction(req, 'error', 'WebhooksRouter', `checkout cfdi cs=${session.id}`);
                                 captureStripeFailure(
                                     auto.error,
                                     webhookCtx(event, 'webhook.checkout.cfdi')
                                 );
                             } else if (auto.skipped) {
-                                console.log(
-                                    `[stripe][webhook] setup auto CFDI skipped reason=${auto.reason} cs=${session.id}`
-                                );
+                                logAction(req, 'info', 'WebhooksRouter', `checkout cfdi skipped reason=${auto.reason} cs=${session.id}`);
                             }
                         }
                     } catch (setupBillErr) {
+                        logAction(req, 'error', 'WebhooksRouter', `checkout billing cs=${session.id}`, setupBillErr);
                         captureOpsError(
                             setupBillErr,
                             webhookCtx(event, 'webhook.checkout.billing')
                         );
                     }
                 } catch (error) {
-                    console.error('[stripe][webhook] checkout.session.completed error:', error.message);
+                    logAction(req, 'error', 'WebhooksRouter', 'checkout.session.completed', error);
                     captureOpsError(error, webhookCtx(event, 'webhook.checkout.session.completed'));
                 }
                 break;
@@ -485,6 +497,7 @@ const WebhooksRouter = async (req, res) => {
         }
         
     } catch (error) {
+        logAction(req, 'error', 'WebhooksRouter', `switch type=${event?.type}`, error);
         captureOpsError(error, webhookCtx(event, 'webhook.switch'));
     }
     
@@ -544,6 +557,7 @@ const WebhooksRouter = async (req, res) => {
             }
         }
     } catch (error) {
+        logAction(req, 'error', 'WebhooksRouter', `email type=${event?.type}`, error);
         captureOpsError(error, webhookCtx(event, 'webhook.email'));
     }
 
@@ -552,6 +566,7 @@ const WebhooksRouter = async (req, res) => {
             await PaymentFailedAlertManager.notifyTeam(event, customerInfo);
         }
     } catch (error) {
+        logAction(req, 'error', 'WebhooksRouter', 'paymentFailedAlert', error);
         captureOpsError(error, webhookCtx(event, 'webhook.paymentFailedAlert'));
     }
 
@@ -560,10 +575,11 @@ const WebhooksRouter = async (req, res) => {
             await SetupPaidAlertManager.notifyTeam(event, customerInfo);
         }
     } catch (error) {
+        logAction(req, 'error', 'WebhooksRouter', 'setupPaidAlert', error);
         captureOpsError(error, webhookCtx(event, 'webhook.setupPaidAlert'));
     }
 
-    await flushSentry();
+    await flushTraceIfError(req, res);
     return;
 }
 

@@ -5,6 +5,14 @@ const ProvisionFanout = require('./ProvisionFanout');
 const PaymentFanout = require('./PaymentFanout');
 const GetTechnicalInfoById = require('../queries/GetTechnicalInfoById');
 const { captureOpsError } = require('./captureOpsError');
+const { Tracer } = require('./ObservabilityClient');
+const { logAction } = require('./RequestTrace');
+
+function logPollerError(event, message, err) {
+  const trace = new Tracer();
+  logAction({ trace }, 'error', event, message, err);
+  trace.flush(500).catch(() => {});
+}
 
 const DEFAULT_INTERVAL_MS = 5000;
 let timer = null;
@@ -99,15 +107,18 @@ async function tick() {
           action: job.action,
           technical_info_id: job.technical_info_id,
         });
+        logPollerError('OpsJobPoller', `job=${job.id} action=${job.action}`, err);
         try {
           await OpsJobManager.markFailed(job.id, err.message, job.attempts, db);
         } catch (markErr) {
           captureOpsError(markErr, { job_id: job.id, phase: 'markFailed' });
+          logPollerError('OpsJobPoller', `markFailed job=${job.id}`, markErr);
         }
       }
     }
   } catch (err) {
     captureOpsError(err, { phase: 'OpsJobPoller.tick' });
+    logPollerError('OpsJobPoller', 'tick', err);
   } finally {
     running = false;
   }
@@ -118,10 +129,16 @@ function start(intervalMs = Number(process.env.OPS_JOB_POLLER_MS) || DEFAULT_INT
   if (process.env.NODE_ENV === 'test') return;
   console.log(`[stripe][OpsJobPoller] start interval=${intervalMs}ms`);
   timer = setInterval(() => {
-    tick().catch((err) => captureOpsError(err, { phase: 'OpsJobPoller.interval' }));
+    tick().catch((err) => {
+      captureOpsError(err, { phase: 'OpsJobPoller.interval' });
+      logPollerError('OpsJobPoller', 'interval', err);
+    });
   }, intervalMs);
   if (typeof timer.unref === 'function') timer.unref();
-  tick().catch((err) => captureOpsError(err, { phase: 'OpsJobPoller.first' }));
+  tick().catch((err) => {
+    captureOpsError(err, { phase: 'OpsJobPoller.first' });
+    logPollerError('OpsJobPoller', 'first', err);
+  });
 }
 
 function stop() {

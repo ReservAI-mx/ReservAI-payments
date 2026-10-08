@@ -1,4 +1,4 @@
-const { addRequestTraceStep } = require('../utils/RequestTrace');
+const { addRequestTraceStep, logAction } = require('../utils/RequestTrace');
 
 class PathSecurityValidator {
     // Extensiones de archivos sensibles
@@ -260,6 +260,7 @@ class PathSecurityValidator {
         return (req, res, next) => {
             // Validar URL completa
             if (req.originalUrl && !this.isPathSafe(req.originalUrl)) {
+                logAction(req, 'warning', 'PathSecurityValidator', 'FORBIDDEN_RESOURCE');
                 return res.status(403).json({
                     error: 'Forbidden',
                     message: 'Access to this resource is not allowed',
@@ -269,6 +270,7 @@ class PathSecurityValidator {
 
             // Validar path
             if (req.path && !this.isPathSafe(req.path)) {
+                logAction(req, 'warning', 'PathSecurityValidator', 'FORBIDDEN_RESOURCE');
                 return res.status(403).json({
                     error: 'Forbidden',
                     message: 'Access to this resource is not allowed',
@@ -278,6 +280,7 @@ class PathSecurityValidator {
 
             // Validar parámetros de ruta
             if (req.params && !this.validateObject(req.params)) {
+                logAction(req, 'warning', 'PathSecurityValidator', 'FORBIDDEN_PARAMETER');
                 return res.status(403).json({
                     error: 'Forbidden',
                     message: 'Access to this resource is not allowed',
@@ -287,6 +290,7 @@ class PathSecurityValidator {
 
             // Validar query parameters
             if (req.query && !this.validateObject(req.query)) {
+                logAction(req, 'warning', 'PathSecurityValidator', 'FORBIDDEN_QUERY');
                 return res.status(403).json({
                     error: 'Forbidden',
                     message: 'Access to this resource is not allowed',
@@ -300,6 +304,7 @@ class PathSecurityValidator {
                 
                 for (const field of suspiciousFields) {
                     if (req.body[field] && !this.isPathSafe(req.body[field])) {
+                        logAction(req, 'warning', 'PathSecurityValidator', 'FORBIDDEN_FILE_REFERENCE');
                         return res.status(403).json({
                             error: 'Forbidden',
                             message: 'Access to this resource is not allowed',

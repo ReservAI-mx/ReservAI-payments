@@ -2,6 +2,7 @@ const SubscriptionManager = require('../utils/SubscriptionManager');
 const PaginationManager = require('../utils/PaginationManager');
 const { connectDB } = require('../data/connectDB');
 const { captureStripeFailure } = require('../utils/captureOpsError');
+const { logAction } = require('../utils/RequestTrace');
 
 const GetMySubscriptions = async (req, res) => {
     const { customer } = req;
@@ -14,6 +15,7 @@ const GetMySubscriptions = async (req, res) => {
     try {
         db = await connectDB();
     } catch (error) {
+        logAction(req, 'error', 'GetMySubscriptions', `db account=${account.id}`, error);
         captureStripeFailure(error, { phase: 'billing.subscriptions.connectDB' });
         return res.status(500).json({ error: 'Internal server error' });
     }
@@ -27,6 +29,7 @@ const GetMySubscriptions = async (req, res) => {
         limit + 1
     );
     if (result.error) {
+        logAction(req, 'error', 'GetMySubscriptions', `list account=${account.id}`);
         captureStripeFailure(result.error, { phase: 'billing.subscriptions.list' });
         return res.status(500).json({ error: result.error });
     }
@@ -38,6 +41,7 @@ const GetMySubscriptions = async (req, res) => {
         data = data.slice(0, limit);
     }
 
+    logAction(req, 'info', 'GetMySubscriptions', `ok account=${account.id} page=${page} count=${data.length}`);
     return res.status(200).json({
         data,
         total,

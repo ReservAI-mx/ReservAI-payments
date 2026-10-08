@@ -1,6 +1,7 @@
 const TechnicalInfoManager = require('../utils/TechnicalInfoManager');
 const PaginationManager = require('../utils/PaginationManager');
 const { connectDB } = require('../data/connectDB');
+const { logAction } = require('../utils/RequestTrace');
 
 const TENANT_STATUSES = new Set([
     'all',
@@ -18,6 +19,7 @@ const ListTenants = async (req, res) => {
     if (!status) status = 'all';
     if (!search) search = 'all';
     if (!TENANT_STATUSES.has(status)) {
+        logAction(req, 'warning', 'ListTenants', 'invalid status');
         return res.status(400).json({ error: 'status de filtro inválido' });
     }
     const limit = parseInt(process.env.LIMIT_PER_PAGE, 10) || 6;
@@ -26,6 +28,7 @@ const ListTenants = async (req, res) => {
     try {
         db = await connectDB();
     } catch (error) {
+        logAction(req, 'error', 'ListTenants', 'db', error);
         return res.status(500).json({ error: 'Internal server error' });
     }
 
@@ -38,6 +41,7 @@ const ListTenants = async (req, res) => {
         db
     );
     if (result.error) {
+        logAction(req, 'error', 'ListTenants', 'list');
         return res.status(500).json({ error: result.error });
     }
 
@@ -48,6 +52,7 @@ const ListTenants = async (req, res) => {
         data = data.slice(0, limit);
     }
 
+    logAction(req, 'info', 'ListTenants', `ok page=${page} count=${data.length} status=${status}`);
     return res.status(200).json({
         data,
         total,
