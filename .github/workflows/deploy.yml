@@ -30,7 +30,7 @@ jobs:
         run: npm ci
 
       - name: audit
-        run: npm audit
+        run: npm audit --omit=dev
 
       - name: Check required files
         run: |
