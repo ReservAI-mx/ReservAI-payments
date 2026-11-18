@@ -10,7 +10,7 @@ primary_region = "dfw"
   auto_stop_machines = "suspend"
   auto_start_machines = true
   # Con 0, cold start vía flycast a menudo → 502 en el gateway sin logs en Node.
-  min_machines_running = 1
+  min_machines_running = 0
 
 [[vm]]
   size = "shared-cpu-1x"
